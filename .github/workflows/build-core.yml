@@ -1,0 +1,248 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 LianXia233
+#
+# MTWIFI-CI 构建核心：主线快照基座 → 闭源驱动移植层 → 固件产出
+#
+#   ① checkout 本仓库（流水线脚本 + port/ 移植补丁 + 设备资产）
+#   ② clone 并固定 ImmortalWrt 基线快照
+#   ③ Scripts/overlay-mtk.sh —— 闭源驱动叠加与 6.18 适配（移植层核心）
+#   ④ feeds → 插件注入 → 个性化 → defconfig → verify-config 强校验
+#   ⑤ 编译（失败自动降级串行 V=s 采集断点）→ 报告 → 缓存 → Release
+
+name: build-core
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        required: true
+        type: string
+      base-repo:
+        required: true
+        type: string
+      base-ref:
+        required: true
+        type: string
+      base-pin:
+        required: true
+        type: string
+      theme:
+        required: true
+        type: string
+      hostname:
+        required: true
+        type: string
+      ssid:
+        required: true
+        type: string
+      wifi-key:
+        required: true
+        type: string
+      lan-ip:
+        required: true
+        type: string
+      admin-password:
+        required: true
+        type: string
+      extra-packages:
+        required: false
+        type: string
+      test-mode:
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  port-and-build:
+    name: ${{ inputs.config }} @ ${{ inputs.base-pin }}
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.meta.outputs.cache-key }}
+    env:
+      WRT_CONFIG: ${{ inputs.config }}
+      WRT_THEME: ${{ inputs.theme }}
+      WRT_HOSTNAME: ${{ inputs.hostname }}
+      WRT_SSID: ${{ inputs.ssid }}
+      WRT_WIFI_KEY: ${{ inputs.wifi-key }}
+      WRT_LAN_IP: ${{ inputs.lan-ip }}
+      WRT_ADMIN_PW: ${{ inputs.admin-password }}
+      WRT_EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+      WRT_TEST: ${{ inputs.test-mode && 'true' || 'false' }}
+      # 闭源驱动源码树引用（overlay 层数据源，按需覆盖）
+      MTK_CHASEY_REF: 25.12
+      MTK_PDN_REF: mt798x-mt799x-6.6-mtwifi
+    steps:
+      - name: 检出本仓库
+        uses: actions/checkout@main
+
+      - name: 编译宿主准备
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo bash .github/scripts/host-setup.sh
+
+      - name: 构建元信息
+        id: meta
+        run: |
+          WRT_TARGET=$(grep -m1 -oP '^CONFIG_TARGET_\K[^=_]+(?==y)' "Config/$WRT_CONFIG.txt")
+          WRT_SUBTARGET=$(grep -m1 -oP "^CONFIG_TARGET_${WRT_TARGET}_\K[^=_]+(?==y)" "Config/$WRT_CONFIG.txt")
+          PIN8=${{ inputs.base-pin }}
+          PREFIX="mtwifi-${PIN8::8}-$WRT_TARGET-$WRT_SUBTARGET"
+          {
+            echo "date=$(TZ=UTC-8 date +'%y.%m.%d-%H.%M.%S')"
+            echo "target=$WRT_TARGET"
+            echo "subtarget=$WRT_SUBTARGET"
+            echo "cache-prefix=$PREFIX"
+            echo "cache-key=$PREFIX-${{ inputs.base-pin }}"
+          } >> "$GITHUB_OUTPUT"
+          echo "WRT_TARGET=$WRT_TARGET"        >> "$GITHUB_ENV"
+          echo "WRT_SUBTARGET=$WRT_SUBTARGET"  >> "$GITHUB_ENV"
+          echo "WRT_DATE=$(TZ=UTC-8 date +'%y.%m.%d-%H.%M.%S')" >> "$GITHUB_ENV"
+
+      - name: 固定基线快照
+        run: |
+          mkdir -p /mnt/build_wrt
+          [ -w /mnt/build_wrt ] || sudo chown "$USER":"$USER" /mnt/build_wrt
+          sudo ln -sfn /mnt/build_wrt wrt
+          cd wrt
+          git init -q
+          git remote add origin "${{ inputs.base-repo }}"
+          git fetch -q --depth 1 origin "${{ inputs.base-pin }}"
+          git checkout -q FETCH_HEAD
+          echo "BASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "基线：${{ inputs.base-ref }} @ $(git rev-parse --short HEAD)"
+
+      - name: 移植层 —— 闭源 MTK 驱动叠加
+        run: bash Scripts/overlay-mtk.sh
+
+      - name: 更新并安装 feeds
+        run: |
+          cd wrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 注入第三方插件
+        run: cd wrt && bash "$GITHUB_WORKSPACE/Scripts/feeds.sh"
+
+      - name: 个性化与设备资产
+        run: cd wrt && bash "$GITHUB_WORKSPACE/Scripts/tweaks.sh"
+
+      - name: 合成构建配置
+        run: |
+          cd wrt
+          cat "$GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt" \
+              "$GITHUB_WORKSPACE/Config/common.txt" >> .config
+          if [ -n "$WRT_EXTRA_PACKAGES" ]; then
+            printf '%s\n' "$WRT_EXTRA_PACKAGES" >> .config
+          fi
+          make defconfig -j"$(nproc)"
+          make clean -j"$(nproc)" >/dev/null 2>&1 || true
+
+      - name: 构建前强校验
+        run: cd wrt && bash "$GITHUB_WORKSPACE/Scripts/verify-config.sh"
+
+      - name: 仅测试模式 —— 上传合成配置
+        if: ${{ inputs.test-mode }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: config-only-${{ inputs.config }}
+          path: wrt/.config
+
+      - name: Rust 工具链引导（自家 Rust 插件）
+        if: ${{ !inputs.test-mode }}
+        run: cd wrt && bash "$GITHUB_WORKSPACE/.github/scripts/rust-toolchain.sh"
+
+      - name: 恢复编译缓存
+        if: ${{ !inputs.test-mode }}
+        uses: actions/cache/restore@main
+        id: cache-restore
+        with:
+          key: ${{ steps.meta.outputs.cache-key }}
+          restore-keys: ${{ steps.meta.outputs.cache-prefix }}-
+          path: |
+            wrt/.ccache
+            wrt/staging_dir/host*
+            wrt/staging_dir/tool*
+
+      - name: 预热恢复的编译缓存
+        if: ${{ !inputs.test-mode && steps.cache-restore.outputs.cache-matched-key != '' }}
+        run: |
+          cd wrt
+          find staging_dir -type d -name stamp -not -path '*target*' \
+            | while read -r dir; do find "$dir" -type f -exec touch {} +; done
+          mkdir -p tmp && touch tmp/.build
+
+      - name: 拉取源码包
+        if: ${{ !inputs.test-mode }}
+        run: cd wrt && make download -j"$(nproc)"
+
+      - name: 编译固件（失败自动串行 V=s 采集断点）
+        if: ${{ !inputs.test-mode }}
+        run: |
+          cd wrt
+          mkdir -p "$GITHUB_WORKSPACE/build-reports"
+          if ! make -j"$(nproc)" BUILD_LOG="$GITHUB_WORKSPACE/build-reports/parallel.log"; then
+            make -j1 V=s BUILD_LOG="$GITHUB_WORKSPACE/build-reports/serial.log"
+          fi
+
+      - name: 汇总构建与移植报告
+        if: ${{ !inputs.test-mode && always() }}
+        continue-on-error: true
+        run: bash .github/scripts/collect-reports.sh
+
+      - name: 上传移植/构建报告
+        if: ${{ !inputs.test-mode && always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports-${{ inputs.config }}-${{ github.run_attempt }}
+          path: build-reports/
+          retention-days: 14
+
+      - name: 保存编译缓存
+        if: ${{ !inputs.test-mode && success() && steps.cache-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@main
+        with:
+          key: ${{ steps.meta.outputs.cache-key }}
+          path: |
+            wrt/.ccache
+            wrt/staging_dir/host*
+            wrt/staging_dir/tool*
+
+      - name: 收拢固件产物
+        if: ${{ !inputs.test-mode }}
+        run: |
+          cd wrt && mkdir -p upload
+          cp -f .config "upload/Config-$WRT_CONFIG-$WRT_DATE.txt"
+          find bin/targets -iregex '.*\(buildinfo\|json\|sha256sums\|packages\|manifest\)' -delete
+          for file in $(find bin/targets -type f -iname "*$WRT_TARGET*"); do
+            base=$(basename "$file")
+            ext=${base#*.}
+            stem=$(basename "${base%%.*}" | grep -io "$WRT_TARGET.*")
+            mv -f "$file" "upload/$stem-$WRT_CONFIG-$WRT_DATE.$ext"
+          done
+          find bin/targets -type f -exec mv -f {} upload/ \;
+          make clean -j"$(nproc)" >/dev/null 2>&1 || true
+
+      - name: 发布 Release
+        if: ${{ !inputs.test-mode }}
+        uses: softprops/action-gh-release@master
+        with:
+          tag_name: ${{ inputs.config }}-${{ steps.meta.outputs.date }}
+          files: wrt/upload/*.*
+          body: |
+            **${{ inputs.config }}** · ImmortalWrt 主线快照（内核 6.18）+ 闭源 MTK 驱动移植层
+
+            mtwifi 无线驱动 · HNAT 硬件加速 · WED/WHNAT 无线卸载 · USB 蜂窝模组加速
+
+            | 项目 | 值 |
+            |---|---|
+            | 基线 | immortalwrt/immortalwrt @ ${{ env.BASE_COMMIT }} |
+            | 平台 | ${{ env.WRT_TARGET }}/${{ env.WRT_SUBTARGET }} |
+            | 后台 | ${{ inputs.lan-ip }} · root / 无密码（首次登录请立即设置） |
+            | WiFi | ${{ inputs.ssid }} / ${{ inputs.wifi-key }} |
+
+            移植报告见 Actions Artifacts（reports-*），6.18 适配以最新一次运行为准。

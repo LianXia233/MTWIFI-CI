@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 LianXia233
+#
+# MTWIFI-CI 调度器
+# 基线：ImmortalWrt 主线快照（内核 6.18.55，固定 fd622ba）
+# 移植层：Scripts/overlay-mtk.sh 将闭源 MTK 驱动（mtwifi / mt_wifi7 + HNAT）
+#         适配叠加到主线之上，6.18 断点在 port/ 内迭代收敛。
+
+name: mtwifi
+
+on:
+  schedule:
+    # 每周一 05:00（北京时间）
+    - cron: 0 21 * * 0
+  workflow_dispatch:
+    inputs:
+      pin:
+        description: '基线快照 commit（留空 = 内置固定快照 fd622ba）'
+        required: false
+        type: string
+      packages:
+        description: '临时追加插件（CONFIG_PACKAGE_xxx=y，多个用\n隔开）'
+        required: false
+        type: string
+      test:
+        description: '仅合成 .config 并上传，不编译固件'
+        default: false
+        required: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 清理历史 Release 与 Workflow 日志
+        uses: ophub/delete-releases-workflows@main
+        with:
+          gh_token: ${{ secrets.GITHUB_TOKEN }}
+          delete_releases: true
+          releases_keep_latest: 3
+          delete_tags: true
+          delete_workflows: true
+          workflows_keep_day: 7
+
+  firmware:
+    needs: cleanup
+    name: ${{ matrix.config }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # H5000M（MT7987A + MT7992）· mt_wifi7 + HNAT
+          - H5000M-MT7-MT5700
+          - H5000M-MT7-MT5700M
+          # AP3000M（MT7981B）· mt_wifi + HNAT
+          - AP3000M-MT
+
+    uses: ./.github/workflows/build-core.yml
+    with:
+      config: ${{ matrix.config }}
+      base-repo: https://github.com/immortalwrt/immortalwrt.git
+      base-ref: master
+      base-pin: ${{ inputs.pin || 'fd622baa05b8adf55970ecfb123f9c3fed0f23a8' }}
+      theme: vantage
+      hostname: OWRT
+      ssid: OWRT
+      wifi-key: 12345678
+      lan-ip: 192.168.10.1
+      admin-password: 无
+      extra-packages: ${{ inputs.packages }}
+      test-mode: ${{ inputs.test || false }}

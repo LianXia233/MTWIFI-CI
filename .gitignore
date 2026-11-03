@@ -1,0 +1,6 @@
+# 本地构建/分析产物不入库
+build-reports/
+.mtk-port/
+*.orig
+*.rej
+.DS_Store

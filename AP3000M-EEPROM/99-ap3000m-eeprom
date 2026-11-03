@@ -1,0 +1,98 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# AP3000M: Initialize factory EEPROM from template on first boot
+# Writes device-specific MAC-patched EEPROM to eMMC factory partition
+# and firmware path. Compatible with BOTH:
+#   - mt76 (mainline, nvmem eeprom_factory_0 cell)
+#   - closed mt_wifi (MTK_FIRST_IF_EEPROM_FLASH, RTMP_FLASH RF_OFFSET=0xc0000)
+#
+# Self-guards:
+#   1. Only runs on airpi,ap3000m boards (never touches H5000M factory)
+#   2. Only writes when factory partition lacks a valid MT7981 chip ID
+
+# Guard 1: only this board
+BOARD="$(cat /tmp/sysinfo/board_name 2>/dev/null)"
+[ "$BOARD" = "airpi,ap3000m" ] || exit 0
+
+# Guard 2: only eMMC factory partition layout
+[ -b /dev/mmcblk0p2 ] || exit 0
+
+TPL="/lib/firmware/mediatek/mt7981_eeprom_mt7976_dbdc.bin"
+[ -f "$TPL" ] || exit 0
+
+# Check if factory partition already contains valid EEPROM (chip ID 0x7981 at offset 0)
+CHIP_ID=$(dd if=/dev/mmcblk0p2 bs=1 count=4 2>/dev/null | od -A n -t x1 | tr -d ' ')
+if [ "$CHIP_ID" = "81 79 00 00" ]; then
+	echo "AP3000M: factory EEPROM already initialized, skipping."
+	exit 0
+fi
+
+echo "AP3000M: initializing factory EEPROM..."
+
+# Read device base MAC from eth0 (wired LAN interface)
+MAC0=$(cat /sys/class/net/eth0/address 2>/dev/null | tr -d ':')
+if [ -z "$MAC0" ] || [ ${#MAC0} -ne 12 ]; then
+	# Fallback: try LAN1 interface or DTS label
+	MAC0=$(cat /sys/class/net/lan1/address 2>/dev/null | tr -d ':')
+fi
+if [ -z "$MAC0" ] || [ ${#MAC0} -ne 12 ]; then
+	echo "AP3000M: no valid MAC found, using default."
+	MAC0="000000000001"
+fi
+
+# Parse MAC bytes for phy0 (offset 4-9)
+O0=$((0x${MAC0:0:2})); O1=$((0x${MAC0:2:2})); O2=$((0x${MAC0:4:2}))
+O3=$((0x${MAC0:6:2})); O4=$((0x${MAC0:8:2})); O5=$((0x${MAC0:10:2}))
+
+# Compute phy1 MAC = phy0 MAC + 1 (offset 10-15)
+P3=$O3; P4=$O4; P5=$((O5 + 1))
+if [ $P5 -gt 255 ]; then P5=0; P4=$((O4 + 1)); fi
+if [ $P4 -gt 255 ]; then P4=0; P3=$((O3 + 1)); fi
+
+# Copy template to temp
+cp "$TPL" /tmp/ap3000m_ee.bin
+
+# Write phy0 MAC at offset 4
+printf "$(printf '\\x%02x' $O0 $O1 $O2 $O3 $O4 $O5)" | \
+	dd of=/tmp/ap3000m_ee.bin bs=1 seek=4 count=6 conv=notrunc 2>/dev/null
+
+# Write phy1 MAC at offset 10
+printf "$(printf '\\x%02x' $O0 $O1 $O2 $P3 $P4 $P5)" | \
+	dd of=/tmp/ap3000m_ee.bin bs=1 seek=10 count=6 conv=notrunc 2>/dev/null
+
+# Verify chip ID
+VERIFY=$(dd if=/tmp/ap3000m_ee.bin bs=1 count=4 2>/dev/null | od -A n -t x1 | tr -d ' ')
+if [ "$VERIFY" != "81 79 00 00" ]; then
+	echo "AP3000M: EEPROM verification failed, aborting."
+	rm -f /tmp/ap3000m_ee.bin
+	exit 1
+fi
+
+# Write to eMMC factory partition (EEPROM source for both drivers)
+dd if=/tmp/ap3000m_ee.bin of=/dev/mmcblk0p2 bs=4096 count=1 conv=notrunc 2>/dev/null
+if [ $? -ne 0 ]; then
+	echo "AP3000M: failed to write factory partition!"
+	rm -f /tmp/ap3000m_ee.bin
+	exit 1
+fi
+
+# Update firmware file for redundancy
+cp /tmp/ap3000m_ee.bin "$TPL"
+rm -f /tmp/ap3000m_ee.bin
+
+# Fix wireless config: radio1 is 5GHz (Band 2) on MT7976 DBDC, not 2G
+# (mtwifi-cfg / luci-app-mtwifi-cfg friendly; uci keys are shared)
+WIFI_CFG="/etc/config/wireless"
+if [ -f "$WIFI_CFG" ] && grep -q "radio1" "$WIFI_CFG" 2>/dev/null; then
+	uci -q batch <<EOF
+set wireless.radio1.band='5g'
+set wireless.radio1.channel='36'
+set wireless.radio1.htmode='HE160'
+commit wireless
+EOF
+	wifi reload 2>/dev/null &
+fi
+
+echo "AP3000M: EEPROM initialized successfully."
+echo "  phy0 MAC: ${MAC0:0:2}:${MAC0:2:2}:${MAC0:4:2}:${MAC0:6:2}:${MAC0:8:2}:${MAC0:10:2}"
+echo "  phy1 MAC: ${MAC0:0:2}:${MAC0:2:2}:${MAC0:4:2}:$(printf '%02x' $P3):$(printf '%02x' $P4):$(printf '%02x' $P5)"
