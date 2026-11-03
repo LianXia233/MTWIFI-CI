@@ -20,12 +20,10 @@ mtwifi / mt_wifi7 无线驱动 · HNAT 硬件加速 · WED/WHNAT 无线卸载 ·
 | 配置 | 设备 | SoC / WiFi | 闭源驱动 | 加速 |
 |---|---|---|---|---|
 | `H5000M-MT7-MT5700` | Hiveton H5000M | MT7987A + MT7992（BE6500） | **mt_wifi7** + conninfra/warp/mt_hwifi | HNAT + WED + USB 卸载 |
-| `H5000M-MT7-MT5700M` | Hiveton H5000M | 同上 | 同上 | 同上 |
 | `AP3000M-MT` | AirPi AP3000M | MT7981B（AX3000，IPA+ILNA） | **mt_wifi**（7.6x）+ conninfra/warp | HNAT + WARP v2 + USB 卸载 |
 
-两份 H5000M 配置对应两套互斥的 MT5700M 模组管理插件（AT 串口独占）：
-`MT5700` = [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700)（Rust/Tokio），
-`MT5700M` = [FAN789/luci-app-mt5700m](https://github.com/FAN789/luci-app-mt5700m)（经典 C）。**严禁跨固件混装。**
+H5000M 的模组管理固定使用 [LianXia233/luci-app-mt5700](https://github.com/LianXia233/luci-app-mt5700)
+（Rust/Tokio 异步常驻后端）；AP3000M 走 QModem。
 
 ## 流水线架构
 

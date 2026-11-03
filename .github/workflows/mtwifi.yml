@@ -53,9 +53,8 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          # H5000M（MT7987A + MT7992）· mt_wifi7 + HNAT
+          # H5000M（MT7987A + MT7992）· mt_wifi7 + HNAT · MT5700 Rust 套件
           - H5000M-MT7-MT5700
-          - H5000M-MT7-MT5700M
           # AP3000M（MT7981B）· mt_wifi + HNAT
           - AP3000M-MT
 

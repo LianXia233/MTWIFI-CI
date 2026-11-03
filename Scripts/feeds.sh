@@ -43,7 +43,6 @@ pull LianXia233/luci-app-airpi3000m-fancontrol main "luci-app-airpi3000m-fancont
 pull LianXia233/luci-app-h5000m-fancontrol     main "luci-app-h5000m-fancontrol"
 pull LianXia233/luci-app-h5000m-netmode        main "luci-app-h5000m-netmode"
 pull LianXia233/luci-app-mt5700                main "luci-app-mt5700"
-pull LianXia233/luci-app-mt5700m               main "luci-app-mt5700m"
 pull LianXia233/luci-app-netmonitor            main "luci-app-netmonitor"
 pull LianXia233/luci-app-qmodem-generic        main "luci-app-qmodem-generic"
 pull LianXia233/luci-app-chfs                  main "luci-app-chfs"
