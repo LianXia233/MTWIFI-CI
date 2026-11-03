@@ -116,7 +116,7 @@ jobs:
           echo "基线：${{ inputs.base-ref }} @ $(git rev-parse --short HEAD)"
 
       - name: 移植层 —— 闭源 MTK 驱动叠加
-        run: bash Scripts/overlay-mtk.sh
+        run: cd wrt && bash "$GITHUB_WORKSPACE/Scripts/overlay-mtk.sh"
 
       - name: 更新并安装 feeds
         run: |

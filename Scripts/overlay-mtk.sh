@@ -2,19 +2,21 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 LianXia233
 #
-# overlay-mtk.sh —— MTWIFI-CI 移植层核心
+# overlay-mtk.sh v2 —— MTWIFI-CI 移植层核心
+# 由 build-core.yml 在 wrt/（immortalwrt 基线树）内调用。
 #
-# 任务：把 mt798x 闭源驱动生态叠加到 ImmortalWrt 主线快照（内核 6.18）之上。
-#
-#   [1] package/mtk 合并：mt_wifi7 全家桶（padavanonly）+ 旧版 mt_wifi（chasey）
-#   [2] mtk_hnat 内核驱动源码 → files-6.18（取 chasey 6.12 版本，离目标最近）
+#   [0] 环境硬守卫（cwd、基线树、内核版本）
+#   [1] package/mtk 合并：mt_wifi7 全家桶（pdn）+ 旧版 mt_wifi 与独有应用（chasey）
+#   [2] mtk_hnat / wifi_utility 内核源码 → files-6.18
 #   [3] kmod-mediatek_hnat 包定义挂入 netdevices.mk
-#   [4] 内核侧 HNAT 补丁系列（chasey 6.12 → 6.18）逐补丁 best-effort，失败入报告
-#   [5] 本仓库 port/ 移植补丁（严格模式：失败即停，人工迭代点）
-#   [6] 移植清单与失败报告（build-reports/overlay-manifest.txt）
+#   [4] chasey 内核 HNAT 补丁系列 → 拷贝进 patches-6.18/（构建期由 quilt 应用）
+#   [5] 本仓库移植补丁：port/kernel → 拷贝进 patches-6.18/；
+#       port/repo → 当场应用（严格模式，作用 package/mtk、DTS 等 repo 侧文件）
+#   [6] 移植清单与失败报告
 #
-# 设计原则：上游补丁只做搬运起点，6.18 断点一律收敛到 port/ 内的
-# 本仓库自有补丁（严格模式），保证迭代方向明确、可回滚。
+# 关键认知：immortalwrt checkout 内没有内核源码树 —— 内核补丁一律进
+# patches-<KVER>/，由 OpenWrt 构建系统在内核准备阶段应用；checkout 侧
+# 文件（package/mtk、target DTS）才能当场 patch。
 
 set -uo pipefail
 
@@ -24,96 +26,92 @@ REPORT_DIR="${GITHUB_WORKSPACE:-$WRT_DIR}/build-reports"
 mkdir -p "$SRC_DIR" "$REPORT_DIR"
 
 MANIFEST="$REPORT_DIR/overlay-manifest.txt"
-APPLIED=()
-FAILED=()
+REPO_APPLIED=0
+REPO_FAILED=()
 
 log()  { printf '\n[overlay] %s\n' "$*" | tee -a "$MANIFEST"; }
 note() { printf '[overlay]   %s\n' "$*" | tee -a "$MANIFEST"; }
+die()  { log "FATAL: $*"; exit 1; }
 
 # ---------------------------------------------------------------------------
-# [0] 拉取闭源驱动源码树
+# [0] 环境硬守卫
+# ---------------------------------------------------------------------------
+log "[0/6] 环境守卫"
+[ -f "$WRT_DIR/rules.mk" ]                            || die "cwd 不是 OpenWrt 树（缺 rules.mk）: $WRT_DIR"
+[ -f "$WRT_DIR/target/linux/mediatek/Makefile" ]      || die "缺 target/linux/mediatek/Makefile"
+KVER=$(sed -n 's/^KERNEL_PATCHVER:=//p' "$WRT_DIR/target/linux/mediatek/Makefile" | head -n1 | tr -d ' \t')
+[ -n "$KVER" ]                                        || die "无法解析 KERNEL_PATCHVER"
+note "基线内核: $KVER | cwd: $WRT_DIR"
+
+# ---------------------------------------------------------------------------
+# [1] 拉取闭源驱动源码树
 # ---------------------------------------------------------------------------
 CHASEY_REPO="https://github.com/chasey-dev/immortalwrt-mt798x-rebase.git"
 CHASEY_REF="${MTK_CHASEY_REF:-25.12}"
 PDN_REPO="https://github.com/padavanonly/immortalwrt-mt798x-6.6.git"
 PDN_REF="${MTK_PDN_REF:-mt798x-mt799x-6.6-mtwifi}"
 
-log "克隆驱动源码树（chasey @ $CHASEY_REF / padavanonly @ $PDN_REF）"
-git clone -q --depth=1 --branch "$CHASEY_REF" "$CHASEY_REPO" "$SRC_DIR/chasey" || {
-	log "FATAL: chasey 源码树克隆失败"; exit 1;
-}
-git clone -q --depth=1 --branch "$PDN_REF" "$PDN_REPO" "$SRC_DIR/pdn" || {
-	log "FATAL: padavanonly 源码树克隆失败"; exit 1;
-}
+log "[1/6] 克隆驱动源码树（chasey @ $CHASEY_REF / pdn @ $PDN_REF）"
+git clone -q --depth=1 --branch "$CHASEY_REF" "$CHASEY_REPO" "$SRC_DIR/chasey" || die "chasey 克隆失败"
+git clone -q --depth=1 --branch "$PDN_REF" "$PDN_REPO" "$SRC_DIR/pdn"          || die "pdn 克隆失败"
 CHASEY_COMMIT=$(git -C "$SRC_DIR/chasey" rev-parse --short HEAD)
 PDN_COMMIT=$(git -C "$SRC_DIR/pdn" rev-parse --short HEAD)
-note "chasey  commit: $CHASEY_COMMIT"
-note "pdn     commit: $PDN_COMMIT"
-
-KVER=$(sed -n 's/^KERNEL_PATCHVER:=//p' "$WRT_DIR/target/linux/mediatek/Makefile" | head -n1)
-note "主线内核版本: $KVER"
+note "chasey $CHASEY_COMMIT | pdn $PDN_COMMIT"
 
 # ---------------------------------------------------------------------------
-# [1] package/mtk 合并
-#     以 padavanonly 树为底座：mt_wifi7 + mt_wifi_cmn + mt_hwifi + conninfra
-#     + warp + wifi-profile + 全套应用（datconf / mtwifi-cfg / turboacc-mtk …）
-#     再叠加 chasey 独有内容：旧版 mt_wifi（MT7981 内置 WiFi）与独有应用
+# [2] package/mtk 合并
 # ---------------------------------------------------------------------------
-log "[1/6] 合并 package/mtk"
-cp -a "$SRC_DIR/pdn/package/mtk" "$WRT_DIR/package/" || { log "FATAL: pdn package/mtk 复制失败"; exit 1; }
+log "[2/6] 合并 package/mtk"
+[ -d "$SRC_DIR/pdn/package/mtk" ] || die "pdn 树缺 package/mtk"
+cp -a "$SRC_DIR/pdn/package/mtk" "$WRT_DIR/package/" || die "pdn package/mtk 复制失败"
 
 if [ -d "$SRC_DIR/chasey/package/mtk/drivers/mt_wifi" ]; then
-	cp -a "$SRC_DIR/chasey/package/mtk/drivers/mt_wifi" "$WRT_DIR/package/mtk/drivers/"
-	note "追加旧版 mt_wifi（MT7981 用）"
+	cp -a "$SRC_DIR/chasey/package/mtk/drivers/mt_wifi" \
+		"$WRT_DIR/package/mtk/drivers/" || die "旧版 mt_wifi 复制失败"
+	note "追加旧版 mt_wifi（MT7981 内置 WiFi 用）"
 else
 	note "WARN: chasey 无 mt_wifi 驱动目录，AP3000M 将缺失旧版闭源驱动"
 fi
 
-# chasey 独有应用（-n 不覆盖 pdn 同名包，避免新.flags被旧版回退）
-if [ -d "$SRC_DIR/chasey/package/mtk/applications" ]; then
-	while IFS= read -r -d '' app; do
-		name=$(basename "$app")
-		if [ -e "$WRT_DIR/package/mtk/applications/$name" ]; then
-			note "应用 $name：pdn 已提供，跳过 chasey 版本"
-		else
-			cp -a "$app" "$WRT_DIR/package/mtk/applications/"
-			note "应用 $name：自 chasey 追加"
-		fi
-	done < <(find "$SRC_DIR/chasey/package/mtk/applications" -mindepth 1 -maxdepth 1 -type d -print0)
-fi
+while IFS= read -r -d '' app; do
+	name=$(basename "$app")
+	if [ -e "$WRT_DIR/package/mtk/applications/$name" ]; then
+		note "应用 $name：pdn 已提供，跳过 chasey 版本"
+	else
+		cp -a "$app" "$WRT_DIR/package/mtk/applications/" \
+			|| die "chasey 应用 $name 复制失败"
+		note "应用 $name：自 chasey 追加"
+	fi
+done < <(find "$SRC_DIR/chasey/package/mtk/applications" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
 # ---------------------------------------------------------------------------
-# [2] mtk_hnat 内核驱动 → files-6.18
+# [3] mtk_hnat / wifi_utility 内核源码 → files-6.18（files/ 在构建期覆盖内核树）
 # ---------------------------------------------------------------------------
-log "[2/6] 叠加 mtk_hnat 内核驱动到 files-$KVER"
+log "[3/6] 叠加内核驱动源码到 files-$KVER"
 HNAT_SRC="$SRC_DIR/chasey/target/linux/mediatek/files-6.12/drivers/net/ethernet/mediatek/mtk_hnat"
 HNAT_DST="$WRT_DIR/target/linux/mediatek/files-$KVER/drivers/net/ethernet/mediatek/mtk_hnat"
-if [ -d "$HNAT_SRC" ]; then
-	mkdir -p "$(dirname "$HNAT_DST")"
-	cp -a "$HNAT_SRC" "$HNAT_DST"
-	note "mtk_hnat 源码 → target/linux/mediatek/files-$KVER/（$(find "$HNAT_DST" -name '*.c' | wc -l) 个 C 文件）"
-else
-	log "FATAL: chasey 树缺少 mtk_hnat 源码目录"; exit 1
-fi
+[ -d "$HNAT_SRC" ] || die "chasey 缺 mtk_hnat 源码目录"
+mkdir -p "$(dirname "$HNAT_DST")"
+cp -a "$HNAT_SRC" "$HNAT_DST" || die "mtk_hnat 复制失败"
+note "mtk_hnat → files-$KVER/（$(find "$HNAT_DST" -name '*.c' | wc -l) 个 C 文件）"
 
-# mtk 无线调试工具（mt_wifi 生态应用依赖；存在才叠加）
 WIFI_UTILITY_SRC="$SRC_DIR/pdn/target/linux/mediatek/files-6.6/drivers/net/wireless/wifi_utility"
 if [ -d "$WIFI_UTILITY_SRC" ]; then
 	WIFI_UTILITY_DST="$WRT_DIR/target/linux/mediatek/files-$KVER/drivers/net/wireless/wifi_utility"
 	mkdir -p "$(dirname "$WIFI_UTILITY_DST")"
-	cp -a "$WIFI_UTILITY_SRC" "$WIFI_UTILITY_DST"
-	note "wifi_utility 调试工具 → files-$KVER"
+	cp -a "$WIFI_UTILITY_SRC" "$WIFI_UTILITY_DST" || die "wifi_utility 复制失败"
+	note "wifi_utility → files-$KVER/"
 fi
 
 # ---------------------------------------------------------------------------
-# [3] kmod-mediatek_hnat 包定义挂入 netdevices.mk
+# [4] kmod-mediatek_hnat 包定义挂入 netdevices.mk
 # ---------------------------------------------------------------------------
-log "[3/6] 挂载 kmod-mediatek_hnat 包定义"
+log "[4/6] 挂载 kmod-mediatek_hnat 包定义"
 NETDEVICES="$WRT_DIR/package/kernel/linux/modules/netdevices.mk"
-if grep -q 'KernelPackage/mediatek_hnat$' "$NETDEVICES" 2>/dev/null; then
+[ -f "$NETDEVICES" ] || die "netdevices.mk 不存在"
+if grep -q 'KernelPackage/mediatek_hnat$' "$NETDEVICES"; then
 	note "已存在，跳过"
 else
-	# 依赖标记：主线 mtk_eth_soc 已内建 PPE，HNAT 作为独立模块挂接 netfilter
 	cat >> "$NETDEVICES" <<'EOF'
 
 define KernelPackage/mediatek_hnat
@@ -139,70 +137,69 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# [4] 内核侧 HNAT 补丁系列（chasey 6.12 → 6.18，逐补丁 best-effort）
-#     覆盖：eth-91 挂载点 / hnat-02..15 内核核心适配 / zzz-5xxx 驱动修复
-#           / dts mtkhnat 节点。失败补丁全部记录，收敛后再下沉到 port/。
+# [5] 内核补丁 → patches-$KVER/（构建期 quilt 应用到解压后的内核）
+#     上游（chasey 6.12）系列 + 本仓库 port/kernel，全部只做搬运，
+#     6.12→6.18 的漂移在构建日志中以 quilt .rej 形式暴露，再进 port/ 收敛。
 # ---------------------------------------------------------------------------
-log "[4/6] 应用内核侧 HNAT 补丁系列（best-effort）"
-CHASEY_PATCHES="$SRC_DIR/chasey/target/linux/mediatek/patches-6.12"
-if [ -d "$CHASEY_PATCHES" ]; then
-	for patch in $(cd "$CHASEY_PATCHES" && ls | grep -E '^999-(eth-91-|hnat-|zzz-5|dts-.*mtkhnat)'); do
-		if patch -p1 --forward --no-backup-if-mismatch \
-			-i "$CHASEY_PATCHES/$patch" >> "$MANIFEST" 2>&1; then
-			APPLIED+=("$patch")
-			note "OK    $patch"
-		else
-			# 回滚半套用的 hunk，保持内核树干净，留给 port/ 精修
-			patch -p1 -R --no-backup-if-mismatch -i "$CHASEY_PATCHES/$patch" >/dev/null 2>&1 || true
-			FAILED+=("$patch")
-			note "FAIL  $patch （待 port/ 迭代）"
+log "[5/6] 装载内核补丁到 patches-$KVER/"
+KPDIR="$WRT_DIR/target/linux/mediatek/patches-$KVER"
+mkdir -p "$KPDIR"
+
+KP_COPIED=0
+if [ -d "$SRC_DIR/chasey/target/linux/mediatek/patches-6.12" ]; then
+	for patch in $(cd "$SRC_DIR/chasey/target/linux/mediatek/patches-6.12" && ls | grep -E '^999-(eth-91-|hnat-|zzz-5|dts-.*mtkhnat)'); do
+		if [ -f "$KPDIR/$patch" ]; then
+			note "SKIP $patch（已存在）"
+			continue
 		fi
+		cp "$SRC_DIR/chasey/target/linux/mediatek/patches-6.12/$patch" "$KPDIR/" || die "补丁装载失败: $patch"
+		KP_COPIED=$((KP_COPIED + 1))
+		note "COPY $patch"
 	done
 else
-	log "FATAL: chasey 补丁目录不存在"; exit 1
+	note "WARN: chasey 无 patches-6.12 目录"
 fi
 
-# ---------------------------------------------------------------------------
-# [5] 本仓库移植补丁（port/）—— 严格模式
-#     port/kernel/*.patch  → 内核源码（files-$KVER 或 patches-$KVER 语义）
-#     port/mtk/*.patch     → package/mtk 驱动源码
-#     放进这里的就是人工确认过的 6.18 适配，失败必须停止构建。
-# ---------------------------------------------------------------------------
-log "[5/6] 应用本仓库移植补丁（严格模式）"
 shopt -s nullglob
 for patch in "$GITHUB_WORKSPACE"/port/kernel/*.patch; do
-	if patch -p1 --forward --no-backup-if-mismatch -i "$patch" >> "$MANIFEST" 2>&1; then
-		note "OK    port/kernel/$(basename "$patch")"
-	else
-		log "FATAL: port/kernel/$(basename "$patch") 应用失败 —— 6.18 适配待修正"
-		exit 1
+	pname=$(basename "$patch")
+	if [ -f "$KPDIR/$pname" ]; then
+		note "SKIP port/kernel/$pname（已存在）"
+		continue
 	fi
+	cp "$patch" "$KPDIR/" || die "port/kernel/$pname 装载失败"
+	note "COPY port/kernel/$pname"
 done
-for patch in "$GITHUB_WORKSPACE"/port/mtk/*.patch; do
-	if patch -p1 --forward --no-backup-if-mismatch -d "$WRT_DIR" -i "$patch" >> "$MANIFEST" 2>&1; then
-		note "OK    port/mtk/$(basename "$patch")"
+
+# port/repo：repo 侧文件（package/mtk 驱动源码、target DTS 等）当场应用，严格模式
+for patch in "$GITHUB_WORKSPACE"/port/repo/*.patch; do
+	if patch -p1 --forward --no-backup-if-mismatch -i "$patch" >> "$MANIFEST" 2>&1; then
+		REPO_APPLIED=$((REPO_APPLIED + 1))
+		note "OK    port/repo/$(basename "$patch")"
 	else
-		log "FATAL: port/mtk/$(basename "$patch") 应用失败 —— 驱动源码适配待修正"
-		exit 1
+		patch -p1 -R --no-backup-if-mismatch -i "$patch" >/dev/null 2>&1 || true
+		REPO_FAILED+=("port/repo/$(basename "$patch")")
+		note "FAIL  port/repo/$(basename "$patch")"
 	fi
 done
 shopt -u nullglob
 
 # ---------------------------------------------------------------------------
-# [6] 收尾：清理临时树，输出移植摘要
+# [6] 收尾
 # ---------------------------------------------------------------------------
 log "[6/6] 移植摘要"
 rm -rf "$SRC_DIR"
 {
 	echo ""
 	echo "================ 移植摘要 ================"
-	echo "内核: $KVER | chasey: $CHASEY_COMMIT | pdn: $PDN_COMMIT"
-	echo "上游补丁成功: ${#APPLIED[@]}"
-	echo "上游补丁失败: ${#FAILED[@]}"
-	[ ${#FAILED[@]} -gt 0 ] && printf '  - %s\n' "${FAILED[@]}"
-	echo "port/ 严格补丁: 全部通过"
+	echo "基线内核: $KVER | chasey: $CHASEY_COMMIT | pdn: $PDN_COMMIT"
+	echo "内核补丁装载（构建期由 quilt 应用）: $(ls "$KPDIR" | grep -c '^999-') 个 999-* 系 + 本仓库 port/kernel"
+	echo "上游搬运本轮新增: $KP_COPIED"
+	echo "port/repo 当场应用成功: $REPO_APPLIED / 失败: ${#REPO_FAILED[@]}"
+	[ ${#REPO_FAILED[@]} -gt 0 ] && printf '  - %s\n' "${REPO_FAILED[@]}"
 	echo "=========================================="
 } | tee -a "$MANIFEST"
 
-# 失败补丁清单 > 0 不是错误：这就是移植迭代的输入。
+# 内核补丁的 quilt 应用成败在构建期日志里看（staging_dir/target-*/linux-*/quilt*）。
+[ ${#REPO_FAILED[@]} -eq 0 ] || exit 1
 exit 0
