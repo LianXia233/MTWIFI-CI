@@ -10,9 +10,9 @@ WRT_DIR="$PWD"
 REPORT_DIR="${GITHUB_WORKSPACE:-$WRT_DIR}/build-reports"
 mkdir -p "$REPORT_DIR"
 
-# 基线与配置快照
+# 基线与配置快照（.config 在 wrt/ 基线树内）
 git rev-parse HEAD > "$REPORT_DIR/base-commit.txt" 2>/dev/null || true
-[ -f .config ] && cp .config "$REPORT_DIR/config.txt"
+[ -f wrt/.config ] && cp wrt/.config "$REPORT_DIR/config.txt"
 
 # 内核版本（从产物 manifest 抓取，供 Release 说明）
 find bin/targets -name '*.manifest' 2>/dev/null | head -n1 | xargs -r grep -hoP '^kernel - \K[\d\.]+' \

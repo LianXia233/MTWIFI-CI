@@ -46,6 +46,9 @@ CONFIG_PACKAGE_sms-tool=y
 
 # ---- 存储 / 运维 ----
 CONFIG_PACKAGE_automount=y
+# blkid：闭源 mt_wifi7/mt_hwifi 的 kconfig 硬依赖（DEPENDS:=blkid），
+# 缺失时 kconfig 会静默隐藏整条 WiFi7 kmod 家族
+CONFIG_PACKAGE_blkid=y
 CONFIG_PACKAGE_kmod-fs-btrfs=y
 CONFIG_PACKAGE_kmod-mtd-rw=y
 CONFIG_PACKAGE_nand-utils=y

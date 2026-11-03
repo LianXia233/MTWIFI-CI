@@ -43,6 +43,17 @@ KVER=$(sed -n 's/^KERNEL_PATCHVER:=//p' "$WRT_DIR/target/linux/mediatek/Makefile
 [ -n "$KVER" ]                                        || die "无法解析 KERNEL_PATCHVER"
 note "基线内核: $KVER | cwd: $WRT_DIR"
 
+# 驱动栈判定：两平台独立适配（任务书要求），不允许混装两代闭源无线栈
+#   H5000M* → wifi7  栈：pdn 树（mt_wifi7 + mt_wifi_cmn + mt_hwifi + warp + wifi-profile）
+#   AP3000M* → legacy 栈：chasey 树（mt_wifi 7.6x + conninfra + warp + wifi-profile）
+case "${WRT_CONFIG:-${MTK_STACK:-}}" in
+	H5000M*)  MTK_STACK=wifi7 ;;
+	AP3000M*) MTK_STACK=legacy ;;
+	*) MTK_STACK="${MTK_STACK:-}" ;;
+esac
+[ -n "$MTK_STACK" ] || die "无法从 WRT_CONFIG='$WRT_CONFIG' 判定驱动栈（H5000M*/AP3000M*）"
+note "驱动栈: $MTK_STACK"
+
 # ---------------------------------------------------------------------------
 # [1] 拉取闭源驱动源码树
 # ---------------------------------------------------------------------------
@@ -59,18 +70,20 @@ PDN_COMMIT=$(git -C "$SRC_DIR/pdn" rev-parse --short HEAD)
 note "chasey $CHASEY_COMMIT | pdn $PDN_COMMIT"
 
 # ---------------------------------------------------------------------------
-# [2] package/mtk 合并
+# [2] package/mtk 合并：应用层取并集（pdn 优先），驱动层按栈整体取用
 # ---------------------------------------------------------------------------
-log "[2/6] 合并 package/mtk"
+log "[2/6] 合并 package/mtk（栈: $MTK_STACK）"
 [ -d "$SRC_DIR/pdn/package/mtk" ] || die "pdn 树缺 package/mtk"
 cp -a "$SRC_DIR/pdn/package/mtk" "$WRT_DIR/package/" || die "pdn package/mtk 复制失败"
 
-if [ -d "$SRC_DIR/chasey/package/mtk/drivers/mt_wifi" ]; then
-	cp -a "$SRC_DIR/chasey/package/mtk/drivers/mt_wifi" \
-		"$WRT_DIR/package/mtk/drivers/" || die "旧版 mt_wifi 复制失败"
-	note "追加旧版 mt_wifi（MT7981 内置 WiFi 用）"
+if [ "$MTK_STACK" = legacy ]; then
+	# 旧栈整体来自 chasey（mt_wifi + conninfra + warp + wifi-profile），替换 pdn 驱动层
+	rm -rf "$WRT_DIR/package/mtk/drivers"
+	cp -a "$SRC_DIR/chasey/package/mtk/drivers" "$WRT_DIR/package/mtk/drivers" \
+		|| die "chasey 驱动层复制失败"
+	note "驱动层 = chasey 全套（旧版 mt_wifi + conninfra + warp）"
 else
-	note "WARN: chasey 无 mt_wifi 驱动目录，AP3000M 将缺失旧版闭源驱动"
+	note "驱动层 = pdn 全套（mt_wifi7 + mt_wifi_cmn + mt_hwifi + warp + wifi-profile）"
 fi
 
 while IFS= read -r -d '' app; do

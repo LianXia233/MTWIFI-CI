@@ -30,7 +30,29 @@ CONFIG_MTK_WIFI7_RT_FIRST_IF_RF_OFFSET=0xc0000
 CONFIG_MTK_WIFI7_RT_SECOND_IF_RF_OFFSET=0xc8000
 CONFIG_MTK_WIFI7_HWIFI_SUPPORT=y
 
+# ---- mt_hwifi 内层符号（无前缀直通映射；芯片 kmod 的 kconfig 依赖门）----
+# 取值对齐 pdn 官方 defconfig mt7987_mt7992.config
+CONFIG_MTK_HWIFI_PCI_SUPPORT=y
+CONFIG_MTK_HWIFI_CONNAC_IF_SUPPORT=y
+CONFIG_MTK_HWIFI_WED_SUPPORT=y
+CONFIG_MTK_HWIFI_RX_PROCESS_WORKQUEUE=y
+CONFIG_MTK_HWIFI_MT7992=y
+CONFIG_MTK_HWIFI_MT799A=y
+CONFIG_MTK_HWIFI_MT7992_RRO_MODE=4
+# CONFIG_MTK_HWIFI_FW_HDR_SUPPORT is not set
+# CONFIG_MTK_HWIFI_MD_COEX_SUPPORT is not set
+# CONFIG_MTK_HWIFI_SW_AMSDU is not set
+# CONFIG_MTK_HWIFI_MEM_SHRINK is not set
+# CONFIG_MTK_HWIFI_MT7915 is not set
+# CONFIG_MTK_HWIFI_MT7916 is not set
+# CONFIG_MTK_HWIFI_BELLWETHER is not set
+# CONFIG_MTK_HWIFI_MT7990 is not set
+# CONFIG_MTK_HWIFI_MT7991 is not set
+# CONFIG_MTK_HWIFI_MT7993 is not set
+# CONFIG_MTK_HWIFI_BLACKHAWK_A0 is not set
+
 # ---- 闭源内核模块：WiFi7 全家桶 + HNAT + WED + WARP ----
+# 注意：WiFi7 栈不含 conninfra（其功能并入 wlan_hwifi），依赖树里不存在该包
 CONFIG_PACKAGE_kmod-mt_wifi7=y
 CONFIG_PACKAGE_kmod-mt_wifi_cmn=y
 CONFIG_PACKAGE_kmod-mt_hwifi=y
@@ -40,7 +62,6 @@ CONFIG_PACKAGE_kmod-mt7992=y
 CONFIG_PACKAGE_kmod-mt799a=y
 CONFIG_PACKAGE_kmod-mtk_wed=y
 CONFIG_PACKAGE_kmod-warp=y
-CONFIG_PACKAGE_kmod-conninfra=y
 CONFIG_PACKAGE_kmod-mediatek_hnat=y
 
 # ---- 闭源用户态与 LuCI（lua 前端 + 加速开关 + 均衡调度）----
