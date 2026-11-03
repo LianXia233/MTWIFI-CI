@@ -1,0 +1,41 @@
+SPDX-License-Identifier: MIT
+# 6.18 移植适配：mt_wifi7 config.in THIRD_IF choice 成员命名修复
+#
+# 上游断点：pdn mt798x-mt799x-6.6-mtwifi 分支的 config.in 在 THIRD_IF
+# choice 组里 4 个成员漏了 WIFI7_ 中缀（MTK_THIRD_IF_*），与
+# FIRST/SECOND_IF 命名不一致；6.18 构建链的 kconfig 解析时报
+# 'choice value used outside its choice group'。统一改名。
+--- a/package/mtk/drivers/mt_wifi7/config.in
++++ b/package/mtk/drivers/mt_wifi7/config.in
+@@ -139,27 +139,27 @@
+ 	config MTK_WIFI7_THIRD_IF_NONE
+ 	bool "None"
+ 
+-	config MTK_THIRD_IF_MT7915
++	config MTK_WIFI7_THIRD_IF_MT7915
+         bool "MT7915 (Harrier)"
+         select MTK_WIFI7_CHIP_MT7915
+ 	select MTK_WIFI7_MULTI_INF_SUPPORT
+ 	select MTK_WIFI7_DOT11_BE_SUPPORT
+ 
+-	config MTK_THIRD_IF_MT7990
++	config MTK_WIFI7_THIRD_IF_MT7990
+         bool "MT7990 (Eagle)"
+         select MTK_WIFI7_CHIP_MT7990
+ 	select MTK_WIFI7_MULTI_INF_SUPPORT
+ 	select MTK_WIFI7_UNIFIED_COMMAND
+ 	select MTK_WIFI7_DOT11_BE_SUPPORT
+ 
+-	config MTK_THIRD_IF_MT7992
++	config MTK_WIFI7_THIRD_IF_MT7992
+         bool "MT7992 (Kite)"
+         select MTK_WIFI7_CHIP_MT7992
+ 	select MTK_WIFI7_MULTI_INF_SUPPORT
+ 	select MTK_WIFI7_UNIFIED_COMMAND
+ 	select MTK_WIFI7_DOT11_BE_SUPPORT
+ 
+-	config MTK_THIRD_IF_MT7993
++	config MTK_WIFI7_THIRD_IF_MT7993
+ 		bool "MT7993 (Griffin)"
+         select MTK_WIFI7_CHIP_MT7993
+ 	select MTK_WIFI7_MULTI_INF_SUPPORT
