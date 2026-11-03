@@ -4,16 +4,18 @@
 #
 # verify-config.sh —— defconfig 之后的强校验（在 wrt 根目录执行）
 #
-# 背景：defconfig 会把写错名字/写错层级的符号静默丢弃，最终编出
-# target.mk 默认设备（如 openwrt_one）或漏掉闭源驱动栈。本脚本把
-# 这类事故提前到编译前拦截。
+# 背景：defconfig 会把写错名字/写错层级/依赖不满足的符号静默丢弃，最终
+# 编出 target.mk 默认设备或漏掉闭源驱动栈。本脚本把这类事故提前拦截。
+#
+# 栈感知：与 overlay-mtk.sh 同一套判定 ——
+#   H5000M*  → wifi7  栈（mt_wifi7 家族，无 conninfra）
+#   AP3000M* → legacy 栈（mt_wifi + conninfra + warp）
 
 set -uo pipefail
 
 FAIL=0
 err() { echo "[verify] ✗ $*"; FAIL=1; }
 ok()  { echo "[verify] ✓ $*"; }
-
 require() { # require <描述> <grep -E 模式>
 	if grep -Eq "$2" .config; then
 		ok "$1"
@@ -33,19 +35,33 @@ else
 	err "未锁定任何设备（CONFIG_TARGET_DEVICE_...=y）——defconfig 将回退默认设备！"
 fi
 
-echo "== 闭源驱动栈 =="
-require "mt_wifi / mt_wifi7 至少一个被选中" \
-	'^CONFIG_PACKAGE_kmod-mt(_wifi7?)=y$'
-require "kmod-warp（WED 卸载引擎）" '^CONFIG_PACKAGE_kmod-warp=y$'
-require "kmod-conninfra"           '^CONFIG_PACKAGE_kmod-conninfra=y$'
-require "kmod-mediatek_hnat（HNAT 硬件加速）" \
-	'^CONFIG_PACKAGE_kmod-mediatek_hnat=y$'
+case "${WRT_CONFIG:-}" in
+	H5000M*)  STACK=wifi7 ;;
+	AP3000M*) STACK=legacy ;;
+	*)        STACK=unknown ;;
+esac
+
+echo "== 闭源驱动栈（$STACK）=="
+if [ "$STACK" = legacy ]; then
+	require "kmod-mt_wifi（旧栈主驱动）"   '^CONFIG_PACKAGE_kmod-mt_wifi=y$'
+	require "kmod-conninfra"               '^CONFIG_PACKAGE_kmod-conninfra=y$'
+	require "kmod-warp（WED 卸载引擎）"    '^CONFIG_PACKAGE_kmod-warp=y$'
+elif [ "$STACK" = wifi7 ]; then
+	require "kmod-mt_wifi7（WiFi7 主驱动）" '^CONFIG_PACKAGE_kmod-mt_wifi7=y$'
+	require "kmod-mt_wifi_cmn"              '^CONFIG_PACKAGE_kmod-mt_wifi_cmn=y$'
+	require "kmod-mt_hwifi（硬件抽象层）"   '^CONFIG_PACKAGE_kmod-mt_hwifi=y$'
+	require "kmod-mt7992（芯片驱动）"       '^CONFIG_PACKAGE_kmod-mt7992=y$'
+	require "kmod-mtk_wed（WED glue）"      '^CONFIG_PACKAGE_kmod-mtk_wed=y$'
+	require "kmod-warp（WED 卸载引擎）"     '^CONFIG_PACKAGE_kmod-warp=y$'
+else
+	require "mt_wifi / mt_wifi7 至少一个被选中" '^CONFIG_PACKAGE_kmod-mt(_wifi7?)=y$'
+fi
+require "kmod-mediatek_hnat（HNAT 硬件加速）" '^CONFIG_PACKAGE_kmod-mediatek_hnat=y$'
 
 echo "== 用户态 =="
 require "datconf（驱动参数数据面）" '^CONFIG_PACKAGE_datconf=y$'
 if grep -Eq '^CONFIG_PACKAGE_mtwifi-cfg-ucode=y$' .config; then
 	ok "mtwifi 前端: ucode 版"
-	require "luci-app-mtwifi-cfg" '^CONFIG_PACKAGE_luci-app-mtwifi-cfg=y$'
 elif grep -Eq '^CONFIG_PACKAGE_mtwifi-cfg=y$' .config; then
 	ok "mtwifi 前端: lua 版"
 else
