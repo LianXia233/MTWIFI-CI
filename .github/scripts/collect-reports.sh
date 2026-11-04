@@ -27,6 +27,13 @@ for log in "$REPORT_DIR"/parallel.log "$REPORT_DIR"/serial.log; do
 	fi
 done
 
+# 内核补丁断点：quilt 打不上时的信息是 "Patch failed! Please fix ..."，
+# 不属于 error: 模式，单独抽一份，省得每次都翻 tail
+if [ -f "$REPORT_DIR/serial.log" ]; then
+	grep -nE 'Patch failed!|Please fix |Hunk #[0-9]+ FAILED|Applying .*patches-' \
+		"$REPORT_DIR/serial.log" | tail -n 120 > "$REPORT_DIR/patch-breakpoints.txt" || true
+fi
+
 # ccache 统计
 [ -x ./staging_dir/host/bin/ccache ] && ./staging_dir/host/bin/ccache -s > "$REPORT_DIR/ccache.txt" 2>/dev/null
 
