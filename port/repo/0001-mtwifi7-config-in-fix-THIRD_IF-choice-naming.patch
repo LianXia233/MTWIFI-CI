@@ -1,4 +1,5 @@
 SPDX-License-Identifier: MIT
+# port-stack: wifi7
 # 6.18 移植适配：mt_wifi7 config.in THIRD_IF choice 成员命名修复
 #
 # 上游断点：pdn mt798x-mt799x-6.6-mtwifi 分支的 config.in 在 THIRD_IF
