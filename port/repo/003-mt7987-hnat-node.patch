@@ -1,0 +1,27 @@
+From: "chak-kei.lam" <chak-kei.lam@mediatek.com>
+Subject: [PATCH] arm64: dts: mt7987: add mtkhnat driver support
+
+immortalwrt 6.18 的 mt7987.dtsi 位于仓库内（target/linux/mediatek/dts），
+因此 SoC 侧的 hnat 节点直接在 repo 补丁里挂载，不涉及内核补丁队列。
+节点默认 disabled，由设备 DTS 启用。
+---
+
+--- a/target/linux/mediatek/dts/mt7987.dtsi
++++ b/target/linux/mediatek/dts/mt7987.dtsi
+@@ -233,6 +233,16 @@
+ 					 STATUS_SET)>;
+ 			};
+ 		};
++		hnat: hnat@15000000 {
++			compatible = "mediatek,mtk-hnat_v5";
++			reg = <0 0x15100000 0 0x80000>;
++			interrupts = <GIC_SPI 198 IRQ_TYPE_LEVEL_HIGH>;
++			resets = <&ethsys 0>;
++			reset-names = "mtketh";
++			mtketh-soc = <&eth>;
++			status = "disabled";
++		};
++
+ 	};
+ 
+ 	fan: pwm-fan {
