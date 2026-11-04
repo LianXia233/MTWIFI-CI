@@ -1,0 +1,24 @@
+From: "chak-kei.lam" <chak-kei.lam@mediatek.com>
+Subject: [PATCH] net: ethernet: mediatek: add mtkhnat flow-check interrupt
+
+6.18 适配：mtk_eth_soc.h 在 6.18 主线中已无 FE 中断状态 2 的寄存器定义，
+原 hunk 的上下文（MTK_FE_INT_STATUS2 0x28）不存在，改为挂在 FE_INT_ENABLE
+之后，并用 #ifndef 保护，避免与后续（或上游）同名宏重复定义。
+---
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.h
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
+@@ -86,6 +86,14 @@
+ /* Frame Engine Interrupt Status Register */
+ #define MTK_INT_STATUS2		0x08
+ #define MTK_FE_INT_ENABLE	0x0c
++#ifndef MTK_FE_INT_STATUS2
++#define MTK_FE_INT_STATUS2	0x28
++#endif
++#ifndef MTK_FE_INT_ENABLE2
++#define MTK_FE_INT_ENABLE2	0x2c
++#define MTK_FE_INT2_PPE0_FLOW_CHK	BIT(28)
++#define MTK_FE_INT2_PPE1_FLOW_CHK	BIT(29)
++#endif
+ #define MTK_FE_INT_FQ_EMPTY	BIT(8)
+ #define MTK_FE_INT_TSO_FAIL	BIT(12)
+ #define MTK_FE_INT_TSO_ILLEGAL	BIT(13)
