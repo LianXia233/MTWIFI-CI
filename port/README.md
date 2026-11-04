@@ -17,7 +17,12 @@ immortalwrt checkout（本仓库 overlay 时可见）
 | 目录 | 作用对象 | overlay 时行为 | 失败表现 |
 |---|---|---|---|
 | `port/kernel/*.patch` | 解压后的内核树（drivers/、arch/ 等） | **拷贝**进 `patches-6.18/`，**优先于上游同名补丁** | 构建期 quilt 打不上 → `内核准备` 步骤失败，日志有 `.rej` |
-| `port/repo/*.patch` | checkout 侧文件（package/mtk、target DTS） | **当场应用**（严格模式） | overlay 步骤立即失败并指名补丁 |
+| `port/repo/*.patch` | checkout 侧文件（package/mtk、target DTS） | **当场应用**（严格模式），支持 `# port-stack: wifi7\|legacy` 声明 | overlay 步骤立即失败并指名补丁；栈不符的补丁跳过 |
+
+栈声明用于两类平台的差异补丁：`H5000M*` 走 `wifi7`（pdn 的 `mt_wifi7`），
+`AP3000M*` 走 `legacy`（chasey 的 `mt_wifi`，整个 `drivers/` 被替换）。
+例如 `port/repo/0001-mtwifi7-config-in-*` 只对 `mt_wifi7/config.in` 生效，
+在 legacy 栈下该路径不存在，必须跳过而不是判失败。
 
 同名覆盖是刻意设计：`port/kernel/999-eth-91-*`、`999-hnat-02-*`、`999-hnat-07-*`
 与 chasey 上游文件同名，overlay 先拷本仓库版本，再补入上游其余文件时自动跳过，
