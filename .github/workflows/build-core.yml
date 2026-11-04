@@ -183,9 +183,12 @@ jobs:
         if: ${{ !inputs.test-mode }}
         run: |
           cd wrt
+          set -o pipefail
           mkdir -p "$GITHUB_WORKSPACE/build-reports"
-          if ! make -j"$(nproc)" BUILD_LOG="$GITHUB_WORKSPACE/build-reports/parallel.log"; then
-            make -j1 V=s BUILD_LOG="$GITHUB_WORKSPACE/build-reports/serial.log"
+          if ! make -j"$(nproc)" 2>&1 | tee "$GITHUB_WORKSPACE/build-reports/parallel.log"; then
+            echo "=== 并行构建失败，降级串行 V=s 采集断点 ==="
+            make -j1 V=s 2>&1 | tee "$GITHUB_WORKSPACE/build-reports/serial.log" || true
+            exit 1
           fi
 
       - name: 汇总构建与移植报告
