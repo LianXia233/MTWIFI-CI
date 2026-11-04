@@ -9,9 +9,16 @@
 #   [1] package/mtk 合并：mt_wifi7 全家桶（pdn）+ 旧版 mt_wifi 与独有应用（chasey）
 #   [2] mtk_hnat / wifi_utility 内核源码 → files-6.18
 #   [3] kmod-mediatek_hnat 包定义挂入 netdevices.mk
-#   [4] chasey 内核 HNAT 补丁系列 → 拷贝进 patches-6.18/（构建期由 quilt 应用）
-#   [5] 本仓库移植补丁：port/kernel → 拷贝进 patches-6.18/；
+#   [4] kmod-mediatek_hnat 包定义挂入 netdevices.mk
+#   [5] 内核补丁装载：port/kernel（6.18 适配版，优先）→ patches-6.18/；
+#       再补入 chasey 的 999-eth-91 / 999-hnat-* C 代码系列（同名不覆盖）；
 #       port/repo → 当场应用（严格模式，作用 package/mtk、DTS 等 repo 侧文件）
+#
+# 注意：chasey 的 DTS 补丁（999-dts-*）不再搬运 —— 它们以上游 6.12 的
+# mt7981/7986/7987/7988 dts、rfb 板级节点为上下文，与 6.18 的 DTS 结构
+# 完全不同，必然 patch 失败并中断整个 target/linux 编译。HNAT 的 DTS 节点
+# 改由 port/kernel/999-dts-mt7981-hnat.patch（SoC 侧）与 port/repo/00x-*
+# （设备侧启用）直接维护。
 #   [6] 移植清单与失败报告
 #
 # 关键认知：immortalwrt checkout 内没有内核源码树 —— 内核补丁一律进
@@ -151,40 +158,43 @@ fi
 
 # ---------------------------------------------------------------------------
 # [5] 内核补丁 → patches-$KVER/（构建期 quilt 应用到解压后的内核）
-#     上游（chasey 6.12）系列 + 本仓库 port/kernel，全部只做搬运，
-#     6.12→6.18 的漂移在构建日志中以 quilt .rej 形式暴露，再进 port/ 收敛。
+#     port/kernel 优先（6.18 适配版，同名覆盖），再从 chasey 补入 C 代码系列。
+#     chasey 的 DTS 系列一律不搬：其上下文（wdma/ap2woccif/rfb 节点）在
+#     6.18 的 dts、dtsi 中已不存在，搬运只会制造必然失败的补丁。
 # ---------------------------------------------------------------------------
 log "[5/6] 装载内核补丁到 patches-$KVER/"
 KPDIR="$WRT_DIR/target/linux/mediatek/patches-$KVER"
 mkdir -p "$KPDIR"
 
-KP_COPIED=0
-if [ -d "$SRC_DIR/chasey/target/linux/mediatek/patches-6.12" ]; then
-	for patch in $(cd "$SRC_DIR/chasey/target/linux/mediatek/patches-6.12" && ls | grep -E '^999-(eth-91-|hnat-|zzz-5|dts-.*mtkhnat)'); do
+PORT_COPIED=0
+shopt -s nullglob
+for patch in "$GITHUB_WORKSPACE"/port/kernel/*.patch; do
+	pname=$(basename "$patch")
+	cp -f "$patch" "$KPDIR/" || die "port/kernel/$pname 装载失败"
+	PORT_COPIED=$((PORT_COPIED + 1))
+	note "COPY port/kernel/$pname（6.18 适配，优先）"
+done
+shopt -u nullglob
+
+UP_COPIED=0
+CHASEY_PDIR="$SRC_DIR/chasey/target/linux/mediatek/patches-6.12"
+if [ -d "$CHASEY_PDIR" ]; then
+	for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-)'); do
 		if [ -f "$KPDIR/$patch" ]; then
-			note "SKIP $patch（已存在）"
+			note "SKIP $patch（port/kernel 已提供 6.18 版本）"
 			continue
 		fi
-		cp "$SRC_DIR/chasey/target/linux/mediatek/patches-6.12/$patch" "$KPDIR/" || die "补丁装载失败: $patch"
-		KP_COPIED=$((KP_COPIED + 1))
+		cp "$CHASEY_PDIR/$patch" "$KPDIR/" || die "补丁装载失败: $patch"
+		UP_COPIED=$((UP_COPIED + 1))
 		note "COPY $patch"
 	done
+	note "chasey 999-dts-* 已按策略跳过（6.12 的 DTS 结构在 6.18 不存在）"
 else
 	note "WARN: chasey 无 patches-6.12 目录"
 fi
 
-shopt -s nullglob
-for patch in "$GITHUB_WORKSPACE"/port/kernel/*.patch; do
-	pname=$(basename "$patch")
-	if [ -f "$KPDIR/$pname" ]; then
-		note "SKIP port/kernel/$pname（已存在）"
-		continue
-	fi
-	cp "$patch" "$KPDIR/" || die "port/kernel/$pname 装载失败"
-	note "COPY port/kernel/$pname"
-done
-
 # port/repo：repo 侧文件（package/mtk 驱动源码、target DTS 等）当场应用，严格模式
+shopt -s nullglob
 for patch in "$GITHUB_WORKSPACE"/port/repo/*.patch; do
 	if patch -p1 --forward --no-backup-if-mismatch -i "$patch" >> "$MANIFEST" 2>&1; then
 		REPO_APPLIED=$((REPO_APPLIED + 1))
@@ -206,8 +216,9 @@ rm -rf "$SRC_DIR"
 	echo ""
 	echo "================ 移植摘要 ================"
 	echo "基线内核: $KVER | chasey: $CHASEY_COMMIT | pdn: $PDN_COMMIT"
-	echo "内核补丁装载（构建期由 quilt 应用）: $(ls "$KPDIR" | grep -c '^999-') 个 999-* 系 + 本仓库 port/kernel"
-	echo "上游搬运本轮新增: $KP_COPIED"
+	echo "patches-$KVER 中 999-* 补丁: $(ls "$KPDIR" | grep -c '^999-') 个"
+	echo "  port/kernel（本仓库，6.18 适配）: $PORT_COPIED"
+	echo "  chasey 上游 C 系列: $UP_COPIED"
 	echo "port/repo 当场应用成功: $REPO_APPLIED / 失败: ${#REPO_FAILED[@]}"
 	[ ${#REPO_FAILED[@]} -gt 0 ] && printf '  - %s\n' "${REPO_FAILED[@]}"
 	echo "=========================================="
