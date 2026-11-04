@@ -195,12 +195,15 @@ shopt -u nullglob
 	UP_COPIED=0
 	CHASEY_PDIR="$SRC_DIR/chasey/target/linux/mediatek/patches-6.12"
 	if [ -d "$CHASEY_PDIR" ]; then
-		# 白名单 = 对 6.18.55 逐补丁 dry-run 验证可直接应用者：
-		#   eth-91 + hnat-03/04/05/06/08/12 + zzz-5101（分类 APPLY）
-		# hnat-02/07/09 由 port/kernel 提供 6.18 版本（同名跳过）；
-		# hnat-14/15（FAIL，stats64 系列）与 zzz-5102..5118 等待移植，不装载；
-		# zzz-52xx 系 wifi_utility 修复针对 chasey 旧副本，pdn 源不需要。
-		for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-(03|04|05|06|08|12)-|zzz-5101-)'); do
+		# 白名单 = chasey 树里验证过的完整 C 系列（OpenWrt 顺序：files-6.18 先
+		# 复制覆盖内核树，patches-6.18 后应用——zzz-51xx 正是打在我们叠加的
+		# mtk_hnat 源码上的驱动修复，与 chasey 自树组合一致）：
+		#   eth-91 + hnat-02..15 + zzz-5101..5118 + zzz-5200/5201
+		# hnat-02/07/09 由 port/kernel 权威版本覆盖（同名跳过）；
+		# 全部 999-dts-* 不装载（6.12 DTS 结构在 6.18 不存在，设备 hnat 节点
+		# 由 port/repo/00x 直接维护）；zzz-5202..5204 针对 chasey 旧版
+		# wifi_utility，pdn 源不需要。
+		for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-(02|03|04|05|06|07|08|09|12|14|15)-|zzz-51[0-9][0-9]-|zzz-520[01]-)'); do
 			if [ -f "$KPDIR/$patch" ]; then
 				note "SKIP $patch（port/kernel 已提供 6.18 版本）"
 				continue
