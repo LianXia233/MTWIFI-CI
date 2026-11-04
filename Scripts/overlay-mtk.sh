@@ -192,22 +192,27 @@ for patch in "$GITHUB_WORKSPACE"/port/kernel/*.patch; do
 done
 shopt -u nullglob
 
-UP_COPIED=0
-CHASEY_PDIR="$SRC_DIR/chasey/target/linux/mediatek/patches-6.12"
-if [ -d "$CHASEY_PDIR" ]; then
-	for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-)'); do
-		if [ -f "$KPDIR/$patch" ]; then
-			note "SKIP $patch（port/kernel 已提供 6.18 版本）"
-			continue
-		fi
-		cp "$CHASEY_PDIR/$patch" "$KPDIR/" || die "补丁装载失败: $patch"
-		UP_COPIED=$((UP_COPIED + 1))
-		note "COPY $patch"
-	done
-	note "chasey 999-dts-* 已按策略跳过（6.12 的 DTS 结构在 6.18 不存在）"
-else
-	note "WARN: chasey 无 patches-6.12 目录"
-fi
+	UP_COPIED=0
+	CHASEY_PDIR="$SRC_DIR/chasey/target/linux/mediatek/patches-6.12"
+	if [ -d "$CHASEY_PDIR" ]; then
+		# 白名单 = 对 6.18.55 逐补丁 dry-run 验证可直接应用者：
+		#   eth-91 + hnat-03/04/05/06/08/12 + zzz-5101（分类 APPLY）
+		# hnat-02/07/09 由 port/kernel 提供 6.18 版本（同名跳过）；
+		# hnat-14/15（FAIL，stats64 系列）与 zzz-5102..5118 等待移植，不装载；
+		# zzz-52xx 系 wifi_utility 修复针对 chasey 旧副本，pdn 源不需要。
+		for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-(03|04|05|06|08|12)-|zzz-5101-)'); do
+			if [ -f "$KPDIR/$patch" ]; then
+				note "SKIP $patch（port/kernel 已提供 6.18 版本）"
+				continue
+			fi
+			cp "$CHASEY_PDIR/$patch" "$KPDIR/" || die "补丁装载失败: $patch"
+			UP_COPIED=$((UP_COPIED + 1))
+			note "COPY $patch"
+		done
+		note "chasey 999-dts-* 已按策略跳过（6.12 的 DTS 结构在 6.18 不存在）"
+	else
+		note "WARN: chasey 无 patches-6.12 目录"
+	fi
 
 # port/repo：repo 侧文件（package/mtk 驱动源码、target DTS 等）当场应用，严格模式
 # 补丁头可用 `# port-stack: wifi7|legacy` 声明适用栈；与当前栈不符则跳过，
