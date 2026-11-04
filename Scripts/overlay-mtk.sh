@@ -125,10 +125,22 @@ fi
 
 # ---------------------------------------------------------------------------
 # [4] kmod-mediatek_hnat 包定义挂入 netdevices.mk
+#     eth-91 的 Kconfig 补丁会引入 MEDIATEK_NETSYS_V2/V3 与 NET_MEDIATEK_HNAT
+#     三个新符号；内核 .config 里没有它们时 syncconfig 会以 (NEW) 交互提问，
+#     非交互环境直接失败（历史报错：MediaTek Ethernet NETSYS V2 support (NEW)）。
+#     这里按平台把对应的 NETSYS 代际写进 KCONFIG，由 OpenWrt 合并进内核 .config。
 # ---------------------------------------------------------------------------
 log "[4/6] 挂载 kmod-mediatek_hnat 包定义"
 NETDEVICES="$WRT_DIR/package/kernel/linux/modules/netdevices.mk"
 [ -f "$NETDEVICES" ] || die "netdevices.mk 不存在"
+# MT7987（H5000M，wifi7 栈）属 NETSYS V3（XGMAC/USXGMII）
+# MT7981（AP3000M，legacy 栈）属 NETSYS V2
+if [ "$MTK_STACK" = legacy ]; then
+	NETSYS_KCONFIG='CONFIG_MEDIATEK_NETSYS_V2=y'
+else
+	NETSYS_KCONFIG='CONFIG_MEDIATEK_NETSYS_V3=y'
+fi
+note "NETSYS 代际: $NETSYS_KCONFIG"
 if grep -q 'KernelPackage/mediatek_hnat$' "$NETDEVICES"; then
 	note "已存在，跳过"
 else
@@ -141,7 +153,8 @@ define KernelPackage/mediatek_hnat
   KCONFIG:= \
 	CONFIG_BRIDGE_NETFILTER=y \
 	CONFIG_NETFILTER_FAMILY_BRIDGE=y \
-	CONFIG_NET_MEDIATEK_HNAT
+	CONFIG_NET_MEDIATEK_HNAT \
+	CONFIG_MEDIATEK_NETSYS_STACK=y
   FILES:= \
 	$(LINUX_DIR)/drivers/net/ethernet/mediatek/mtk_hnat/mtkhnat.ko
 endef
@@ -153,7 +166,10 @@ endef
 
 $(eval $(call KernelPackage,mediatek_hnat))
 EOF
-	note "kmod-mediatek_hnat → netdevices.mk"
+	# 占位符替换（heredoc 用 <<'EOF' 保证 $(LINUX_DIR) 不被 shell 展开）
+	sed -i "s|CONFIG_MEDIATEK_NETSYS_STACK=y|$NETSYS_KCONFIG|" "$NETDEVICES" \
+		|| die "NETSYS KCONFIG 替换失败"
+	note "kmod-mediatek_hnat → netdevices.mk（$NETSYS_KCONFIG）"
 fi
 
 # ---------------------------------------------------------------------------
