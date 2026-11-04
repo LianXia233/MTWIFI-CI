@@ -1,0 +1,24 @@
+From: LianXia233
+Subject: [PATCH] mediatek: dts: airpi-ap3000m: enable mtkhnat offload
+
+AP3000M（MT7981B，2×GMAC）启用 HNAT 硬件加速。
+wan = eth1（gmac1 / 内置 GbE PHY），lan 前缀匹配 lan*；
+端口绑定沿用 mtkhnat 在 mt7981 参考板上的取值，待实机复核。
+---
+
+--- a/target/linux/mediatek/dts/mt7981b-airpi-ap3000m.dts
++++ b/target/linux/mediatek/dts/mt7981b-airpi-ap3000m.dts
+@@ -151,6 +151,13 @@
+ 	};
+ };
+ 
++&hnat {
++	mtketh-wan = "eth1";
++	mtketh-lan = "lan";
++	mtketh-max-gmac = <2>;
++	status = "okay";
++};
++
+ &mdio_bus {
+ 	phy1: ethernet-phy@1 {
+ 		compatible = "ethernet-phy-ieee802.3-c45";
