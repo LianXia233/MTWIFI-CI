@@ -179,6 +179,21 @@ jobs:
         if: ${{ !inputs.test-mode }}
         run: cd wrt && make download -j"$(nproc)"
 
+      # 补丁（patches-6.18）在内核解压后由 quilt 逐个应用，任一失败即中断编译。
+      # 单跑 prepare 可把断点暴露时间从「等工具链编完的 40+ 分钟」压缩到数分钟，
+      # 且 .prepared 已就位，后续 world 不会重复解压/打补丁。
+      - name: 内核准备（补丁预检）
+        if: ${{ !inputs.test-mode }}
+        run: |
+          cd wrt
+          mkdir -p "$GITHUB_WORKSPACE/build-reports"
+          LOG="$GITHUB_WORKSPACE/build-reports/kernel-prepare.log"
+          if ! make -j"$(nproc)" target/linux/prepare V=s BUILD_LOG="$LOG"; then
+            echo "::error title=内核补丁应用失败::patches-6.18 中存在与 6.18 不兼容的补丁，详见 reports-* 的 kernel-prepare.log"
+            grep -nE "Patch failed|Hunk #[0-9]+ FAILED|Please fix" "$LOG" 2>/dev/null | tail -20 || true
+            exit 1
+          fi
+
       - name: 编译固件（失败自动串行 V=s 采集断点）
         if: ${{ !inputs.test-mode }}
         run: |
