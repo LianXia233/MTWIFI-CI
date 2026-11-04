@@ -1,0 +1,24 @@
+From: LianXia233
+Subject: [PATCH] mediatek: dts: hiveton-h5000m: enable mtkhnat offload
+
+H5000M（MT7987A，gmac0=2.5G RTL8221B / gmac1=内置 2.5G）启用 HNAT。
+wan = eth1、lan 前缀 lan*、max-gmac = 2；端口绑定待实机复核。
+---
+
+--- a/target/linux/mediatek/dts/mt7987a-hiveton-h5000m.dts
++++ b/target/linux/mediatek/dts/mt7987a-hiveton-h5000m.dts
+@@ -94,6 +94,14 @@
+ 	status = "okay";
+ };
+ 
++&hnat {
++	mtketh-wan = "eth1";
++	mtketh-lan = "lan";
++	mtketh-max-gmac = <2>;
++	mtketh-ppe-num = <2>;
++	status = "okay";
++};
++
+ &fan {
+ 	pwms = <&pwm 1 50000 0>;
+ 	status = "okay";
