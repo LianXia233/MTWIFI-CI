@@ -73,11 +73,14 @@ immortalwrt 6.18 树的差异主要落在 `mtk_eth_soc.c/.h`，仍以 CI 的
 ```
 Actions 构建
    ├─ overlay 步骤：port/repo 应用失败 → 立即修（本目录补丁写错目标）
-   ├─ 内核准备（补丁预检）：数分钟内暴露 patches-6.18 的 .rej
-   └─ 编译失败 → 下载 reports-* 看 serial.log / kernel-prepare.log
+   └─ 编译失败 → 下载 reports-* 看 parallel.log / serial.log（含 quilt .rej）
         ▼
 在 port/kernel/ 或 port/repo/ 写正式适配补丁 → 提交 → 下一轮
 ```
+
+> 试过在 world 之前单跑 `make target/linux/prepare` 做补丁预检，想把它当成
+> "数分钟暴露断点"的捷径；实测首次运行（缓存未命中）在 `tools/install` 上就
+> 跑了 79 分钟，反而比它要省的 40 分钟更久，已回退。
 
 ## 已知断点清单（后续重点观察）
 
