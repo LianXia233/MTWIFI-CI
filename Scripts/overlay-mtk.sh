@@ -194,15 +194,23 @@ else
 fi
 
 # port/repo：repo 侧文件（package/mtk 驱动源码、target DTS 等）当场应用，严格模式
+# 补丁头可用 `# port-stack: wifi7|legacy` 声明适用栈；与当前栈不符则跳过，
+# 避免 wifi7 专用补丁在 legacy 栈（chasey 驱动层，无 mt_wifi7 目录）上误报失败。
 shopt -s nullglob
 for patch in "$GITHUB_WORKSPACE"/port/repo/*.patch; do
+	pname="port/repo/$(basename "$patch")"
+	stack_req=$(sed -n 's/^#[[:space:]]*port-stack:[[:space:]]*//p' "$patch" | head -n1 | tr -d ' \t')
+	if [ -n "$stack_req" ] && [ "$stack_req" != "$MTK_STACK" ]; then
+		note "SKIP $pname（仅适用 $stack_req 栈，当前 $MTK_STACK）"
+		continue
+	fi
 	if patch -p1 --forward --no-backup-if-mismatch -i "$patch" >> "$MANIFEST" 2>&1; then
 		REPO_APPLIED=$((REPO_APPLIED + 1))
-		note "OK    port/repo/$(basename "$patch")"
+		note "OK    $pname"
 	else
 		patch -p1 -R --no-backup-if-mismatch -i "$patch" >/dev/null 2>&1 || true
-		REPO_FAILED+=("port/repo/$(basename "$patch")")
-		note "FAIL  port/repo/$(basename "$patch")"
+		REPO_FAILED+=("$pname")
+		note "FAIL  $pname"
 	fi
 done
 shopt -u nullglob
