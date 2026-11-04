@@ -62,7 +62,9 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `999-eth-91-*` | 错误路径在 6.18 已重构：`free_netdev(eth->dummy_dev)` / `mtk_napi_del()` / `mtk_release_all_muxes()` 均不存在，hunk 8 整体失败 | 改用最小上下文锚定 `err_deinit_ppe`，只保留 HNAT 接管 PPE 生命周期的条件编译 |
 | `999-hnat-02-*` | 6.18 的 `mtk_eth_soc.h` 没有 `MTK_FE_INT_STATUS2 0x28`（原 hunk 的锚点） | 挂到 `MTK_FE_INT_ENABLE` 之后，并用 `#ifndef` 保护，避免与上游重复定义 |
 | `999-hnat-07-*` | `dsa_user_netdev_ops` 在 6.18 新增 `ndo_hwtstamp_get/set`，原 hunk 以 `};` 紧跟 `ndo_fill_forward_path` 为上下文 | 以 hwtstamp 字段为后置上下文插入 `ndo_flow_offload_check` |
-| `999-hnat-03/04/05/06/08/09/12/14/15` | 无（offset/fuzz 内可直接应用） | 原样搬运 |
+| `999-hnat-09-*` | `ip6_tnl_netdev_ops` 的成员表在 immortalwrt 6.18 里与 6.12 不同，`net/ipv6/ip6_tunnel.c` 的 hunk 3 整体失败 | hunk 3 改为 `ndo_get_iflink` 单行前置上下文 + 结构收尾，其余 hunk 原样 |
+| Kconfig（非补丁） | `999-eth-91` 引入 `MEDIATEK_NETSYS_V2/V3`、`NET_MEDIATEK_HNAT` 三个新符号，内核 `.config` 无默认值 → `syncconfig` 以 `(NEW)` 交互提问，非交互环境 Error 1 | `kmod-mediatek_hnat` 的 KCONFIG 按栈补 NETSYS 代际（wifi7→V3 / legacy→V2）；`CONFIG_NET_MEDIATEK_HNAT` 保持不带值（=m，产出 `mtkhnat.ko`） |
+| `999-hnat-03/04/05/06/08/12/14/15` | 无（offset/fuzz 内可直接应用） | 原样搬运 |
 
 以上适配在 upstream v6.18 源码上以 `patch -p1` 逐个验证过（含 hunk 级）；与
 immortalwrt 6.18 树的差异主要落在 `mtk_eth_soc.c/.h`，仍以 CI 的
