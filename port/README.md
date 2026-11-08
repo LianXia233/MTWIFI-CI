@@ -55,6 +55,39 @@ HNAT 的 DTS 节点改由本目录直接维护：
 > 方向判错（表现为加速不生效或统计异常），需要按实机 `ip link` 结果改
 > `mtketh-wan`。
 
+## HNAT 增强功能（原上游 51xx 系列）
+
+上游 6.12 的 HNAT 增强补丁按功能拆成三组，本仓库全部按 6.18 的接口重新落位，
+不再以"缺少前置补丁"为由跳过：
+
+| 补丁 | 功能 | 6.18 处理 |
+|---|---|---|
+| `999-hnat-26` | PPE 表项数量按代际切换 | 原样命中，未改上下文 |
+| `999-hnat-27` ~ `999-hnat-29` | debugfs：hook 开关读取、绑定速率字段、统计摘要 | 原样命中 |
+| `999-hnat-30` / `31` | debugfs：PPD 属性集、wan/lan 属性集 | 原样命中 |
+| `999-hnat-32` | rx ppd（接收侧直通设备） | 原样命中，依赖 `999-hnat-40` 提供的 `g_rx_ppdev` |
+| `999-hnat-33` / `34` | 外接设备 ingress 钩子、网卡名前缀匹配 | 原样命中 |
+| `999-hnat-35` | 非 L2 桥报文跳过 FDB 检查 | 原样命中 |
+| `999-hnat-36` | 绕过 GE 口的 PPD 载波检查 | 原样命中 |
+| `999-hnat-37` | 内核依赖改为通用 nf nat | 原样命中 |
+| `999-hnat-38` | NETSYS_V2 上启用 wifi hook 的 tx hqos | 原样命中 |
+| `999-hnat-39` | 外接设备报文固定从 PSE 第三口转发 | 重写：6.18 的 `mtk_tx_map()` 已改为经 `txd_info` 汇总写描述符，覆盖点移到 `mtk_tx_set_dma_desc()` 之后 |
+| `999-hnat-40` | 收回报文交还 rx ppd 设备 | 重写：6.18 的 `mtk_poll_rx()` 在 `eth_type_trans()` 之前确定 `netdev`，重定向改在该处替换 `netdev` |
+| `999-hnat-24` | 组播表项按代际写 NPU 落点 | 新写：`tport_id`/`tops_entry` 只在 V3 表项布局存在，按 `CONFIG_MEDIATEK_NETSYS_V3` 分支，并以 `hnat_data->mcast` 能力位拒绝 V2 的卸载请求 |
+| `999-hnat-25` | 802.1Q tag proto 判定 | 新写：外接交换机 tagger 的 proto 收进其 Kconfig 条件，未编入 tagger 时判定退化为纯 8021Q |
+
+两条没有落地，原因不是"拿不到补丁"，而是 6.18 里没有可改的对象：
+
+- **QDMA 64 TXQ**：需要在 QDMA 寄存器窗口里切换 16 队列的分页寄存器
+  （`reg_map->qdma.page`）。6.18 的 `mtk_reg_map` 没有该字段，也没有等价
+  的窗口切换路径，队列表与调度器寄存器仍是单页布局。只把
+  `MTK_QDMA_NUM_QUEUES` 改成 64 会让 16 号以后的队列写到同一组寄存器上，
+  属于"编译通过、行为错误"，因此不做。
+- **V2 关闭 tnl 出口字段**：该改动保护的是 TX 描述符里的 tport/tops_entry/cdrt
+  位段，这三个位段由上游 eth 系列的 crypto-tx / tnl-offload 补丁写入；6.18 的
+  `mtk_tx_set_dma_desc_v2()` 根本没有这几个字段（`txd7`/`txd8` 恒为 0），
+  没有需要按代际关闭的写入路径。
+
 ## 6.18 适配记录
 
 | 补丁 | 断点 | 处理 |
@@ -62,13 +95,29 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `999-eth-91-*` | 错误路径在 6.18 已重构：`free_netdev(eth->dummy_dev)` / `mtk_napi_del()` / `mtk_release_all_muxes()` 均不存在，hunk 8 整体失败 | 改用最小上下文锚定 `err_deinit_ppe`，只保留 HNAT 接管 PPE 生命周期的条件编译 |
 | `999-hnat-02-*` | 6.18 的 `mtk_eth_soc.h` 没有 `MTK_FE_INT_STATUS2 0x28`（原 hunk 的锚点） | 挂到 `MTK_FE_INT_ENABLE` 之后，并用 `#ifndef` 保护，避免与上游重复定义 |
 | `999-hnat-07-*` | `dsa_user_netdev_ops` 在 6.18 新增 `ndo_hwtstamp_get/set`，原 hunk 以 `};` 紧跟 `ndo_fill_forward_path` 为上下文 | 以 hwtstamp 字段为后置上下文插入 `ndo_flow_offload_check` |
-| `999-hnat-09-*` | `ip6_tnl_netdev_ops` 的成员表在 immortalwrt 6.18 里与 6.12 不同，`net/ipv6/ip6_tunnel.c` 的 hunk 3 整体失败 | hunk 3 改为 `ndo_get_iflink` 单行前置上下文 + 结构收尾，其余 hunk 原样 |
+| `999-hnat-09-*` | 6.18 没有 `ndo_ip6_tnl_flow_offload`，`ip6_tnl_netdev_ops` / `ipip6_netdev_ops` 的成员表也与 6.12 不同；且 6.18 的 `tnl->dev` 指向隧道设备自身 | 回调改挂 `ndo_flow_offload_check`；只置 `DEV_PATH_DSLITE`/`DEV_PATH_6RD` 类型位并记下 `virt_dev`，不再用自指的 `path->dev` |
 | Kconfig（非补丁） | `999-eth-91` 引入 `MEDIATEK_NETSYS_V2/V3`、`NET_MEDIATEK_HNAT` 三个新符号，内核 `.config` 无默认值 → `syncconfig` 以 `(NEW)` 交互提问，非交互环境 Error 1 | `kmod-mediatek_hnat` 的 KCONFIG 按栈补 NETSYS 代际（wifi7→V3 / legacy→V2）；`CONFIG_NET_MEDIATEK_HNAT` 保持不带值（=m，产出 `mtkhnat.ko`） |
 | `999-hnat-03/04/05/06/08/12/14/15` | 无（offset/fuzz 内可直接应用） | 原样搬运 |
+| `999-hnat-11-*` | 6.18 的 `dev_path_type` 枚举尾项是 `DEV_PATH_MTK_WDMA` | 在其后追加 `DEV_PATH_DSLITE` / `DEV_PATH_6RD` / `DEV_PATH_TNL`，不改动已有数值 |
+| `999-hnat-16-*` | 6.18 已有 `MTK_QDMA_NUM_QUEUES`，但没有 `MTK_QDMA_QUEUE_MASK`；`MTK_FE_RESET_NAT_DONE` 移出到 `999-hnat-23` 的公共头文件 | 只保留缺的那个宏，并加 `#ifndef` |
+| `999-hnat-17-*` | 6.18 没有 `drivers/net/ethernet/mediatek/mtk_eth_dbg.h` | 只删 `hnat_debugfs.c` 里对该头文件的引用；`hnat_nf_hook.c` 需要的 `mtk_eth_reset.h` 由 `999-hnat-23` 提供 |
+| `999-hnat-21-*` | `ppp_channel_ops` 在 6.18 没有 `flow_offload_check`（由 `999-hnat-06` 引入）；`session->tunnel` 可能为 NULL | 回调按真实成员表落位；取 tunnel 前先 `READ_ONCE` 快照并判空 |
+| `999-hnat-23-*` | 6.18 的 `mtk_pending_work()` 在 `mtk_hw_init(eth, true)` 之后立即重开设备 | 在两者之间广播 `MTK_FE_RESET_NAT_DONE`，事件号放进新建的 `mtk_eth_reset.h` 供两侧共用 |
+| `999-hnat-24/25/39/40` | 见上节表格 | 按 6.18 结构新写 |
 
-以上适配在 upstream v6.18 源码上以 `patch -p1` 逐个验证过（含 hunk 级）；与
-immortalwrt 6.18 树的差异主要落在 `mtk_eth_soc.c/.h`，仍以 CI 的
-`kernel-prepare.log` 为准。
+验证方式：在 linux-6.18.55 树上（先叠 `files-6.18` 源码与 `ra_nat.h`，再按编号顺序
+`patch -p1 --fuzz=0`）40 条全部命中；随后用 aarch64 交叉工具链对 17 个关键对象
+逐个 `make <obj>.o`，全部通过（`mtk_eth_soc.o`、6 个 `mtk_hnat/*.o`、`skbuff.o`、
+`vlan_dev.o`、`sit.o`、`ip6_tunnel.o`、`ip_gre.o`、`vxlan_core.o`、`l2tp_core.o`、
+`l2tp_ppp.o`、`pptp.o`、`ppp_generic.o`）。CI 侧仍以 `kernel-prepare.log` 为准。
+
+## 编译期约束：NETSYS 代际符号必须是 bool
+
+`CONFIG_MEDIATEK_NETSYS_V2/V3` 若定义成 tristate，在 `CONFIG_NET_MEDIATEK_SOC=m`
+的配置下会被 kconfig 钳制为 `m`，`autoconf.h` 里只剩 `CONFIG_MEDIATEK_NETSYS_V2_MODULE`；
+而闭源 HNAT 源码通篇用 `#if defined(CONFIG_MEDIATEK_NETSYS_V2)` 选表项布局，结果
+是"编译通过、寄存器布局按 V1 解读"。因此两个符号在 `999-eth-91` 里是 `bool`，
+`Scripts/verify-port.sh` 与 `.github/scripts/verify-artifacts.sh` 都按 `=y` 断言。
 
 ## 迭代闭环
 
@@ -86,12 +135,14 @@ Actions 构建
 
 ## 已知断点清单（后续重点观察）
 
-1. `mtk_hnat` 编译：`999-eth-91-*` 已能在 6.18 应用，但 `struct mtk_mac` /
-   `hw_lro` 等符号面是否与 6.18 的 `mtk_eth_soc` 对齐，要看编译日志。
+1. `mtk_hnat` 编译：本机 6.18.55 交叉编译已 17/17 通过；CI 侧仍需看
+   `kernel-prepare.log`，差异预计集中在 immortalwrt 额外带的 `mtk_eth` 补丁上。
 2. DTS 端口绑定：见上表"尚未实机复核"。
 3. `mt_wifi`（7.6x）/ `mt_wifi7`（7.9x）：os_glue 的 timer/workqueue/netlink
    在 6.13+ 的 API 变更；`conninfra`/`warp` 随动 → `port/repo/`。
 4. WED：mt_wifi7 的 whnat 与主线 `mtk_wed` 的符号面需要核对。
+5. 外接交换机（802.1Q tag 判定）：6.18 未移植其 tagger 与驱动，判定按
+   `CONFIG_NET_DSA_TAG_MXL862_8021Q` 条件编译；要支持该芯片需整组移植。 
 
 ## 打补丁规范
 
