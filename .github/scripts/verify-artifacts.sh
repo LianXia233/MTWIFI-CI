@@ -74,7 +74,7 @@ fi
 # ---- 3. 内核配置生效 -----------------------------------------------------
 KCONF="$KDIR/.config"
 if [ -f "$KCONF" ]; then
-	for sym in 'CONFIG_NET_MEDIATEK_HNAT=y' \
+	for sym in 'CONFIG_NET_MEDIATEK_HNAT=m' \
 	           'CONFIG_BRIDGE_NETFILTER=y' \
 	           'CONFIG_NETFILTER_FAMILY_BRIDGE=y'; do
 		if grep -qx "$sym" "$KCONF"; then

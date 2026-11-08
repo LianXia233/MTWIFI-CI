@@ -59,7 +59,9 @@ else
 fi
 
 # ---- 2. HNAT 主符号必须出现在覆盖项 --------------------------------------
-for sym in CONFIG_NET_MEDIATEK_HNAT=y \
+# HNAT 必须是 =m：包定义按 mtkhnat.ko 收集产物，写成 =y 会把它编进 vmlinux、
+# 让 FILES 里的 .ko 不存在。不带值的裸符号在覆盖项里不会成型，所以显式写 =m。
+for sym in CONFIG_NET_MEDIATEK_HNAT=m \
            CONFIG_BRIDGE_NETFILTER=y \
            CONFIG_NETFILTER_FAMILY_BRIDGE=y; do
 	if in_override "$sym"; then
