@@ -144,6 +144,9 @@ jobs:
       - name: 构建前强校验
         run: cd wrt && bash "$GITHUB_WORKSPACE/Scripts/verify-config.sh"
 
+      - name: 移植覆盖项强校验（kernel KCONFIG）
+        run: cd wrt && bash "$GITHUB_WORKSPACE/Scripts/verify-port.sh"
+
       - name: 仅测试模式 —— 上传合成配置
         if: ${{ inputs.test-mode }}
         uses: actions/upload-artifact@v7
@@ -190,6 +193,10 @@ jobs:
             make -j1 V=s 2>&1 | tee "$GITHUB_WORKSPACE/build-reports/serial.log" || true
             exit 1
           fi
+
+      - name: 产物级移植校验
+        if: ${{ !inputs.test-mode }}
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/verify-artifacts.sh"
 
       - name: 汇总构建与移植报告
         if: ${{ !inputs.test-mode && always() }}

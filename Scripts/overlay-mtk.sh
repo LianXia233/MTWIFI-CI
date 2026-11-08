@@ -68,13 +68,36 @@ CHASEY_REPO="https://github.com/chasey-dev/immortalwrt-mt798x-rebase.git"
 CHASEY_REF="${MTK_CHASEY_REF:-25.12}"
 PDN_REPO="https://github.com/padavanonly/immortalwrt-mt798x-6.6.git"
 PDN_REF="${MTK_PDN_REF:-mt798x-mt799x-6.6-mtwifi}"
+# 两棵闭源树都按提交固定：分支 tip 会继续前进（chasey 25.12 的 tip 已比本轮验证的
+# 提交多出 zzz-51xx 等 20 个补丁，它们以前置 chasey 6.12 eth 系列为前提），
+# 而 mtk_hnat 源码、补丁集、port/ 的适配补丁必须同源，否则补丁上下文对不上。
+# 需要跟随上游时，用 MTK_CHASEY_COMMIT / MTK_PDN_COMMIT 覆盖并在 port/README.md 记录验证结果。
+CHASEY_PIN="${MTK_CHASEY_COMMIT:-9f397975c7b47ce6986a6e39529d2f72fd5c729d}"
+PDN_PIN="${MTK_PDN_COMMIT:-30fbc1d6deba23c0e850185021e9ee42214925eb}"
 
-log "[1/6] 克隆驱动源码树（chasey @ $CHASEY_REF / pdn @ $PDN_REF）"
-git clone -q --depth=1 --branch "$CHASEY_REF" "$CHASEY_REPO" "$SRC_DIR/chasey" || die "chasey 克隆失败"
-git clone -q --depth=1 --branch "$PDN_REF" "$PDN_REPO" "$SRC_DIR/pdn"          || die "pdn 克隆失败"
-CHASEY_COMMIT=$(git -C "$SRC_DIR/chasey" rev-parse --short HEAD)
-PDN_COMMIT=$(git -C "$SRC_DIR/pdn" rev-parse --short HEAD)
-note "chasey $CHASEY_COMMIT | pdn $PDN_COMMIT"
+# 按提交做单提交浅克隆；GitHub 允许按 SHA fetch。取不到固定提交时回退到分支 HEAD，
+# 并在清单里留下 WARN，避免静默用一个未验证的源码树。
+fetch_tree() {
+	_repo=$1; _ref=$2; _pin=$3; _dest=$4
+	rm -rf "$_dest"
+	git init -q "$_dest" || return 1
+	git -C "$_dest" remote add origin "$_repo" || return 1
+	if [ -n "$_pin" ] && git -C "$_dest" fetch -q --depth=1 origin "$_pin"; then
+		git -C "$_dest" checkout -q FETCH_HEAD || return 1
+	elif git -C "$_dest" fetch -q --depth=1 origin "$_ref"; then
+		[ -n "$_pin" ] && note "WARN: 取不到固定提交 $_pin，回退分支 $_ref（结果不可复现）"
+		git -C "$_dest" checkout -q FETCH_HEAD || return 1
+	else
+		return 1
+	fi
+}
+
+log "[1/6] 克隆驱动源码树（chasey @ ${CHASEY_PIN:-$CHASEY_REF} / pdn @ ${PDN_PIN:-$PDN_REF}）"
+fetch_tree "$CHASEY_REPO" "$CHASEY_REF" "$CHASEY_PIN" "$SRC_DIR/chasey" || die "chasey 克隆失败"
+fetch_tree "$PDN_REPO" "$PDN_REF" "$PDN_PIN" "$SRC_DIR/pdn"          || die "pdn 克隆失败"
+CHASEY_COMMIT=$(git -C "$SRC_DIR/chasey" rev-parse HEAD)
+PDN_COMMIT=$(git -C "$SRC_DIR/pdn" rev-parse HEAD)
+note "chasey ${CHASEY_COMMIT:0:8} | pdn ${PDN_COMMIT:0:8}"
 
 # ---------------------------------------------------------------------------
 # [2] package/mtk 合并：应用层取并集（pdn 优先），驱动层按栈整体取用
@@ -123,6 +146,17 @@ if [ -d "$WIFI_UTILITY_SRC" ]; then
 	note "wifi_utility → files-$KVER/"
 fi
 
+# HNAT 的 C 补丁在 net/core/skbuff.c 等处插入了 #include <net/ra_nat.h>。
+# 该头文件随闭源 HNAT 栈分发，必须同样落进 files-$KVER，内核的 include 搜索
+# 路径（内核树 + files-<KVER> 叠加层）才能命中；缺失时表现为编译期
+# "fatal error: net/ra_nat.h: No such file or directory"。
+RA_NAT_SRC="$SRC_DIR/chasey/target/linux/mediatek/files-6.12/include/net/ra_nat.h"
+RA_NAT_DST="$WRT_DIR/target/linux/mediatek/files-$KVER/include/net/ra_nat.h"
+[ -f "$RA_NAT_SRC" ] || die "chasey 缺 files-6.12/include/net/ra_nat.h"
+mkdir -p "$(dirname "$RA_NAT_DST")"
+cp -f "$RA_NAT_SRC" "$RA_NAT_DST" || die "ra_nat.h 复制失败"
+note "ra_nat.h → files-$KVER/include/net/（$(wc -c < "$RA_NAT_DST") 字节）"
+
 # ---------------------------------------------------------------------------
 # [4] kmod-mediatek_hnat 包定义挂入 netdevices.mk
 #     eth-91 的 Kconfig 补丁会引入 MEDIATEK_NETSYS_V2/V3 与 NET_MEDIATEK_HNAT
@@ -135,12 +169,18 @@ NETDEVICES="$WRT_DIR/package/kernel/linux/modules/netdevices.mk"
 [ -f "$NETDEVICES" ] || die "netdevices.mk 不存在"
 # MT7987（H5000M，wifi7 栈）属 NETSYS V3（XGMAC/USXGMII）
 # MT7981（AP3000M，legacy 栈）属 NETSYS V2
+# 两个符号都必须显式给值：只给本代 =y 时，另一代仍是 Kconfig 里带提示、无默认值的
+# 新符号，内核 syncconfig 会以 "(NEW)" 追问（非交互环境 Error 1），
+# 历史报错即 MediaTek Ethernet NETSYS V2 support (NEW)。做法与 chasey 自己的
+# target/linux/mediatek/filogic/config-6.12 一致：本代 =y，另一代 not set。
 if [ "$MTK_STACK" = legacy ]; then
 	NETSYS_KCONFIG='CONFIG_MEDIATEK_NETSYS_V2=y'
+	NETSYS_OTHER='CONFIG_MEDIATEK_NETSYS_V3=n'
 else
 	NETSYS_KCONFIG='CONFIG_MEDIATEK_NETSYS_V3=y'
+	NETSYS_OTHER='CONFIG_MEDIATEK_NETSYS_V2=n'
 fi
-note "NETSYS 代际: $NETSYS_KCONFIG"
+note "NETSYS 代际: $NETSYS_KCONFIG / $NETSYS_OTHER"
 if grep -q 'KernelPackage/mediatek_hnat$' "$NETDEVICES"; then
 	note "已存在，跳过"
 else
@@ -154,7 +194,8 @@ define KernelPackage/mediatek_hnat
 	CONFIG_BRIDGE_NETFILTER=y \
 	CONFIG_NETFILTER_FAMILY_BRIDGE=y \
 	CONFIG_NET_MEDIATEK_HNAT \
-	CONFIG_MEDIATEK_NETSYS_STACK=y
+	CONFIG_MEDIATEK_NETSYS_STACK=y \
+	CONFIG_MEDIATEK_NETSYS_OTHER=n
   FILES:= \
 	$(LINUX_DIR)/drivers/net/ethernet/mediatek/mtk_hnat/mtkhnat.ko
 endef
@@ -169,7 +210,9 @@ EOF
 	# 占位符替换（heredoc 用 <<'EOF' 保证 $(LINUX_DIR) 不被 shell 展开）
 	sed -i "s|CONFIG_MEDIATEK_NETSYS_STACK=y|$NETSYS_KCONFIG|" "$NETDEVICES" \
 		|| die "NETSYS KCONFIG 替换失败"
-	note "kmod-mediatek_hnat → netdevices.mk（$NETSYS_KCONFIG）"
+	sed -i "s|CONFIG_MEDIATEK_NETSYS_OTHER=n|$NETSYS_OTHER|" "$NETDEVICES" \
+		|| die "NETSYS 另一代 KCONFIG 替换失败"
+	note "kmod-mediatek_hnat → netdevices.mk（$NETSYS_KCONFIG / $NETSYS_OTHER）"
 fi
 
 # ---------------------------------------------------------------------------
@@ -195,15 +238,17 @@ shopt -u nullglob
 	UP_COPIED=0
 	CHASEY_PDIR="$SRC_DIR/chasey/target/linux/mediatek/patches-6.12"
 	if [ -d "$CHASEY_PDIR" ]; then
-		# 白名单 = chasey 树里验证过的完整 C 系列（OpenWrt 顺序：files-6.18 先
-		# 复制覆盖内核树，patches-6.18 后应用——zzz-51xx 正是打在我们叠加的
-		# mtk_hnat 源码上的驱动修复，与 chasey 自树组合一致）：
-		#   eth-91 + hnat-02..15 + zzz-5101..5118 + zzz-5200/5201
+		# 白名单 = 与 6.18 主线符号面已经对得上的 C 功能系列：
+		#   eth-91 + hnat-02..15
 		# hnat-02/07/09 由 port/kernel 权威版本覆盖（同名跳过）；
 		# 全部 999-dts-* 不装载（6.12 DTS 结构在 6.18 不存在，设备 hnat 节点
-		# 由 port/repo/00x 直接维护）；zzz-5202..5204 针对 chasey 旧版
-		# wifi_utility，pdn 源不需要。
-		for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-(02|03|04|05|06|07|08|09|12|14|15)-|zzz-51[0-9][0-9]-|zzz-520[01]-)'); do
+		# 由 port/repo/00x 直接维护）。
+		# zzz-51xx 不再从上游装载：其中 13 条按 6.18 上下文可直接命中的已固化为
+		# port/kernel/999-hnat-26..38；改动 mtk_eth_soc.c/.h 的 5101/5110 已按
+		# 6.18 的 mtk_tx_map()/mtk_poll_rx() 结构重写为 999-hnat-39/40；
+		# 5106/5113 在 6.18 没有对应实现对象，理由与证据见 port/README.md。
+		# 这里只补上游原始补丁，避免同一改动被装载两次。
+		for patch in $(cd "$CHASEY_PDIR" && ls | grep -E '^999-(eth-91-|hnat-(02|03|04|05|06|07|08|09|12|14|15)-)'); do
 			if [ -f "$KPDIR/$patch" ]; then
 				note "SKIP $patch（port/kernel 已提供 6.18 版本）"
 				continue
@@ -247,7 +292,7 @@ rm -rf "$SRC_DIR"
 {
 	echo ""
 	echo "================ 移植摘要 ================"
-	echo "基线内核: $KVER | chasey: $CHASEY_COMMIT | pdn: $PDN_COMMIT"
+	echo "基线内核: $KVER | chasey: ${CHASEY_COMMIT:0:8} | pdn: ${PDN_COMMIT:0:8}"
 	echo "patches-$KVER 中 999-* 补丁: $(ls "$KPDIR" | grep -c '^999-') 个"
 	echo "  port/kernel（本仓库，6.18 适配）: $PORT_COPIED"
 	echo "  chasey 上游 C 系列: $UP_COPIED"
