@@ -1,0 +1,112 @@
+Subject: [PATCH] mtk_hnat: 组播表项按 NETSYS 代际写 NPU 落点
+
+6.18 适配（本仓库维护）：
+
+组播代码在填充 FOE 表项时直接访问 tport_id / tops_entry，而这两个位域只在
+NETSYS_V3 的表项布局里存在；V2（MT7981/MT7986）的表项没有对应字段，
+无条件写会导致编译失败，即便绕开也会写坏相邻位域。
+
+- 表项填充按代际加编译期分支：V3 写 NPU 落点，V2 只写 iblk2 内的
+  mcast/dp，这是 V2 硬件实际支持的组播转发方式。
+- 卸载使能入口先看 hnat_data->mcast 能力位：只有 V3 数据集置 true，
+  V2 调用方得到 -EOPNOTSUPP，而不是"返回成功却没有任何 NPU 表项生效"。
+- debugfs 的组播表 dump 补 pmcast 空指针判定：V2 从不创建这张表。
+
+---
+
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -2420,10 +2420,14 @@
+ 
+ static int mcast_table_dump(struct seq_file *m, void *private)
+ {
++	struct ppe_mcast_table *pmcast = hnat_priv->pmcast;
+ 	struct ppe_mcast_group *group;
+ 
++	if (!pmcast)
++		return -EOPNOTSUPP;
++
+ 	pr_info("==== PPE Multicast Group List ====\n");
+-	list_for_each_entry(group, &hnat_priv->pmcast->groups, list) {
++	list_for_each_entry(group, &pmcast->groups, list) {
+ 		if (group->ppe_id != -1)
+ 			print_hw_mcast(group);
+ 	}
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
+@@ -138,15 +138,19 @@
+ static void hnat_mcast_foe_mc_enable(struct foe_entry *entry, bool *clr_cache, bool to_npu)
+ {
+ 	if (IS_IPV4_GRP(entry)) {
++#if defined(CONFIG_MEDIATEK_NETSYS_V3)
+ 		entry->ipv4_hnapt.tport_id = 0;
+ 		if (to_npu)
+ 			entry->ipv4_hnapt.tops_entry = HNAT_NPU_ENTRY_MC;
++#endif
+ 		entry->ipv4_hnapt.iblk2.mcast = 1;
+ 		entry->ipv4_hnapt.iblk2.dp = 0;
+ 	} else if (IS_IPV6_GRP(entry)) {
++#if defined(CONFIG_MEDIATEK_NETSYS_V3)
+ 		entry->ipv6_5t_route.tport_id = 0;
+ 		if (to_npu)
+ 			entry->ipv6_5t_route.tops_entry = HNAT_NPU_ENTRY_MC;
++#endif
+ 		entry->ipv6_5t_route.iblk2.mcast = 1;
+ 		entry->ipv6_5t_route.iblk2.dp = 0;
+ 	}
+@@ -192,19 +196,23 @@
+ 	if (IS_IPV4_GRP(foe)) {
+ 		foe->ipv4_hnapt.iblk2.dp = dp;
+ 		foe->ipv4_hnapt.iblk2.mcast = 0;
++#if defined(CONFIG_MEDIATEK_NETSYS_V3)
+ 		foe->ipv4_hnapt.tport_id = 0;
+ 		if (dp == NR_TDMA_PORT)
+ 			foe->ipv4_hnapt.tops_entry = 30;
+ 		else
+ 			foe->ipv4_hnapt.tops_entry = 0;
++#endif
+ 	} else if (IS_IPV6_GRP(foe)) {
+ 		foe->ipv6_5t_route.iblk2.dp = dp;
+ 		foe->ipv6_5t_route.iblk2.mcast = 0;
++#if defined(CONFIG_MEDIATEK_NETSYS_V3)
+ 		foe->ipv6_5t_route.tport_id = 0;
+ 		if (dp == NR_TDMA_PORT)
+ 			foe->ipv6_5t_route.tops_entry = 30;
+ 		else
+ 			foe->ipv6_5t_route.tops_entry = 0;
++#endif
+ 	}
+ 
+ 	foe->bfib1.vpm = 0;
+@@ -1373,11 +1381,18 @@
+ 	struct ppe_mcast_table *pmcast = hnat_priv->pmcast;
+ 	struct ppe_mcast_group *group, *tmp;
+ 
+-	mcast_hook_toggle = enable ? 1 : 0;
++	/*
++	 * NPU 落点字段只在 V3 表项布局里存在，V2 没有可写的硬件入口。
++	 * 在这里按能力位拒绝，避免上层把"没有表项"误当成已经卸载成功。
++	 */
++	if (!hnat_priv->data->mcast)
++		return -EOPNOTSUPP;
+ 
+ 	if (!pmcast)
+ 		return -1;
+ 
++	mcast_hook_toggle = enable ? 1 : 0;
++
+ 	write_lock_bh(&pmcast->mcast_lock);
+ 	list_for_each_entry_safe(group, tmp, &pmcast->groups, list) {
+ 		hnat_mcast_group_handle(group, enable);
+@@ -1441,6 +1456,9 @@
+ {
+ 	struct ppe_mcast_table *pmcast;
+ 
++	if (!hnat_priv->data->mcast)
++		return -EOPNOTSUPP;
++
+ 	if (ppe_id >= CFG_PPE_NUM)
+ 		return -EINVAL;
+ 

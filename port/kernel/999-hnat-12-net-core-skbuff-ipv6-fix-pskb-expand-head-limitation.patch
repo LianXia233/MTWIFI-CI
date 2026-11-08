@@ -1,0 +1,41 @@
+---
+[v1] net: core: fix ipv6 pskb expand head limitation
+
+Fix ipv6 pskb expand head limitation.
+Copy FOE_INFO to the headroom start when space is available.
+---
+v1: fix ipv6 pskb expand head limitation
+---
+
+From 5583834362f5a9050e701e324f6a9b4d7bf5fcdf Mon Sep 17 00:00:00 2001
+From: Sam Shih <sam.shih@mediatek.com>
+Date: Fri, 2 Jun 2023 13:06:29 +0800
+Subject: [PATCH] net: core: fix ipv6 pskb expand head limitation
+
+---
+ net/core/skbuff.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+index 7cd4f55..adaa1a0 100644
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -82,6 +82,7 @@
+ #include <net/page_pool/helpers.h>
+ #include <net/psp/types.h>
+ #include <net/dropreason.h>
++#include <net/ra_nat.h>
+ 
+ #include <linux/uaccess.h>
+ #include <trace/events/skb.h>
+@@ -2276,6 +2277,10 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
+ 	       skb_shinfo(skb),
+ 	       offsetof(struct skb_shared_info, frags[skb_shinfo(skb)->nr_frags]));
+ 
++	/* Copy FOE_INFO to the headroom start when space is available. */
++	if (skb_headroom(skb) >= FOE_INFO_LEN)
++		memcpy(data, skb->head, FOE_INFO_LEN);
++
+ 	/*
+ 	 * if shinfo is shared we must drop the old head gracefully, but if it
+ 	 * is not we can just drop the old head and let the existing refcount

@@ -1,0 +1,24 @@
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] net: device: add DEV_PATH_DSLITE / DEV_PATH_6RD / DEV_PATH_TNL
+
+MTK HNAT 栈在 net_device_path_type 里额外用到三个路径类型：
+ip6_tunnel.c 用 DEV_PATH_DSLITE、sit.c 用 DEV_PATH_6RD、隧道设备
+（GRE / VXLAN / PPPoL2TP / PPTP）用 DEV_PATH_TNL，而 6.18 主线的枚举里
+没有它们，编译会报 undeclared。
+
+6.18 的枚举以 DEV_PATH_MTK_WDMA 结尾，这里在其后追加三者：追加不改变
+已有各项的数值，避免影响 dev_fill_forward_path() 之外任何按数值比较的地方。
+---
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -878,6 +878,9 @@
+ 	DEV_PATH_PPPOE,
+ 	DEV_PATH_DSA,
+ 	DEV_PATH_MTK_WDMA,
++	DEV_PATH_DSLITE,
++	DEV_PATH_6RD,
++	DEV_PATH_TNL,
+ };
+ 
+ struct net_device_path {

@@ -1,0 +1,73 @@
+From: "MTWIFI-CI porting layer" <noreply@example.invalid>
+Subject: [PATCH] net: ethernet: mediatek: notify HNAT after an FE reset completes
+
+mtk_hnat 注册了一个 netdevice notifier，收到 FE 复位完成事件后调用
+hnat_warm_init() 重建 FOE 表（重设 FOE base、清表、重新按 GMAC 绑定
+PPE 端口、重新注册自己的 netevent notifier）。这个事件在 6.18 树上
+没有任何生产者，因此 hnat_warm_init() 永远不会在复位后被调用：
+表现为复位前绑好的流表在复位后静默失效，直到有大流量重新触发绑定。
+
+本补丁补上生产者侧：
+1. 新增 drivers/net/ethernet/mediatek/mtk_eth_reset.h，定义事件号；
+   mtk_hnat 通过 ../mtk_eth_reset.h 同时引用同一个常量，两侧不会漂移。
+2. 在 mtk_pending_work() 里 mtk_hw_init(eth, true) 之后、重新开设备之前
+   广播该事件。
+
+位置选择的依据：6.18 的 mtk_pending_work() 先 mtk_stop() 全部设备，
+再 mtk_hw_init(eth, true)（内部走 mtk_hw_reset()/mtk_hw_warm_reset()，
+硬件复位会清空 PPE 的 FOE 内容），紧接着同一个函数就用 mtk_open()
+把设备重新拉起来；如果重建放在重开之后，重开瞬间进来的报文会命中
+未初始化的 FOE 表。因此插在 mtk_hw_init() 与重开循环之间。
+
+事件只广播给第一个存在的 netdev：mtk_hnat 的处理函数只用 notifier
+的设备指针做日志上下文，不区分是哪一个 MAC，重复广播没有意义。
+---
+diff --git a/drivers/net/ethernet/mediatek/mtk_eth_reset.h b/drivers/net/ethernet/mediatek/mtk_eth_reset.h
+new file mode 100644
+--- /dev/null
++++ b/drivers/net/ethernet/mediatek/mtk_eth_reset.h
+@@ -0,0 +1,12 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef _MTK_ETH_RESET_H_
++#define _MTK_ETH_RESET_H_
++
++/*
++ * FE/PPE 复位完成、设备重开之前广播的 netdevice 事件。
++ * HNAT 驱动收到后重建被硬件复位清空的 FOE 表；两侧共用本头文件，
++ * 保证事件号只有一个来源。
++ */
++#define MTK_FE_RESET_NAT_DONE	0x4001
++
++#endif /* _MTK_ETH_RESET_H_ */
+diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -31,6 +31,7 @@
+ 
+ #include "mtk_eth_soc.h"
+ #include "mtk_wed.h"
++#include "mtk_eth_reset.h"
+ 
+ #if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
+ #include "mtk_hnat/nf_hnat_mtk.h"
+@@ -4511,6 +4512,20 @@
+ 				     eth->dev->pins->default_state);
+ 	mtk_hw_init(eth, true);
+ 
++#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
++	/*
++	 * 硬件复位清空了 FOE 内容并重置了 PPE 基址寄存器，必须在设备重开
++	 * 之前让 HNAT 重建流表，否则重开后的首批报文会命中未初始化的表。
++	 */
++	for (i = 0; i < MTK_MAX_DEVS; i++) {
++		if (!eth->netdev[i])
++			continue;
++
++		call_netdevice_notifiers(MTK_FE_RESET_NAT_DONE, eth->netdev[i]);
++		break;
++	}
++#endif
++
+ 	/* restart DMA and enable IRQs */
+ 	for (i = 0; i < MTK_MAX_DEVS; i++) {
+ 		if (!eth->netdev[i] || !test_bit(i, &restart))

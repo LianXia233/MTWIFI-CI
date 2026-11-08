@@ -1,0 +1,39 @@
+Subject: [PATCH] mtk_hnat: 802.1Q tag proto 判定跟随可选 tagger 编译
+
+6.18 适配（本仓库维护）：
+
+hnat.h 的 802.1Q 判定把 DSA_TAG_PROTO_8021Q 与某款外接交换机的同名 tag
+proto 并列比较。后者由该交换机的 tagger 组件引入，属于可选硬件支持，6.18
+主线没有这个枚举值，无条件引用会直接编译失败。
+
+处理方式：把这一项比较收进该 tagger 的 Kconfig 条件。未编入 tagger 时，
+对应 tag proto 在 DSA 里不可能出现，判定退化成单纯的 8021Q 比较，语义不变；
+一旦以 CONFIG_NET_DSA_TAG_MXL862_8021Q 编入 tagger，比较自动恢复，无需再
+改动这段代码。
+
+---
+
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+@@ -1424,9 +1424,18 @@
+ #define IS_DSA_1G_LAN(dev) (!strncmp(dev->name, "lan", 3) &&		       \
+ 			    strcmp(dev->name, "lan5"))
+ #define IS_DSA_WAN(dev) (!strncmp(dev->name, "wan", 3))
++/* 外接交换机的 802.1Q tagger 是可选组件，未编入时该 proto 不存在 */
++#if IS_ENABLED(CONFIG_NET_DSA_TAG_MXL862_8021Q)
++#define HNAT_IS_TAG_PROTO_MXL8021Q(dp)					\
++	((dp)->cpu_dp->tag_ops->proto == DSA_TAG_PROTO_MXL862_8021Q)
++#else
++#define HNAT_IS_TAG_PROTO_MXL8021Q(dp)					\
++	(false)
++#endif
++
+ #define IS_DSA_TAG_PROTO_8021Q(dp)				        \
+-	(dp->cpu_dp->tag_ops->proto == DSA_TAG_PROTO_8021Q ||		\
+-	 dp->cpu_dp->tag_ops->proto == DSA_TAG_PROTO_MXL862_8021Q)
++	((dp)->cpu_dp->tag_ops->proto == DSA_TAG_PROTO_8021Q ||		\
++	 HNAT_IS_TAG_PROTO_MXL8021Q(dp))
+ #define NONE_DSA_PORT 0xff
+ #define MAX_CRSN_NUM 32
+ #define IPV6_HDR_LEN 40

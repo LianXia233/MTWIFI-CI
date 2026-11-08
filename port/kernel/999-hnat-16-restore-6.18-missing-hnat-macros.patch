@@ -1,0 +1,25 @@
+From: "MTWIFI-CI porting layer" <noreply@example.invalid>
+Subject: [PATCH] net: ethernet: mediatek: restore MTK_QDMA_QUEUE_MASK for 6.18
+
+mtk_hnat 用 MTK_QDMA_QUEUE_MASK 从 skb->mark 里取 TX 队列号（见
+hnat_nf_hook.c 的 qid 计算），该宏在 chasey 6.12 树里由 999-zzz-5113
+随 64 队列改造引入，6.18 主线没有。
+
+6.18 的 mtk_eth_soc.h 已经有 MTK_QDMA_NUM_QUEUES 16（队列数由
+soc->num_tx_queues 描述，MT7981/MT7987 都是 16），因此这里只需按同一
+语义补一个掩码：NUM_QUEUES 恒为 2 的幂，掩码即 NUM_QUEUES - 1。
+用 #ifndef 保护，若后续真正启用较大队列数的驱动也能覆盖。
+---
+diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.h b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.h
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
+@@ -26,6 +26,9 @@
+ #define MTK_DSA_PORT_MASK	GENMASK(2, 0)
+ 
+ #define MTK_QDMA_NUM_QUEUES	16
++#ifndef MTK_QDMA_QUEUE_MASK
++#define MTK_QDMA_QUEUE_MASK	(MTK_QDMA_NUM_QUEUES - 1)
++#endif
+ #define MTK_QDMA_PAGE_SIZE	2048
+ #define MTK_MAX_RX_LENGTH	1536
+ #define MTK_MAX_RX_LENGTH_2K	2048

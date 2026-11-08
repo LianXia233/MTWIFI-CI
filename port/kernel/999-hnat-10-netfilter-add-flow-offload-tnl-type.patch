@@ -1,0 +1,42 @@
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] netfilter: nf_flow_table: add tunnel type to flow_offload_hw_path
+
+闭源 HNAT 栈需要知道一条流来自哪种隧道：hnat_nf_hook.c 直接把这个值当作
+硬件 TOPS 表项索引（索引 = 类型 + 1），并在封装前按类型预扩 skb headroom。
+因此类型编号必须与硬件配置表逐项对应，不能只保留其中一种。
+
+只声明 VXLAN 一个类型时，其余隧道（GRETAP / PPTP / L2TP）的流会取到同一
+个 TOPS 表项，表现为"能编译、能下发流表、但硬件用错封装模板"，属于难以
+从日志发现的隐性故障。这里把六种隧道按硬件顺序完整声明。
+
+字段宽度取 u32，与驱动侧 skb_hnat_set_tops() 的入参宽度一致，避免截断。
+---
+diff --git a/include/net/netfilter/nf_flow_table.h b/include/net/netfilter/nf_flow_table.h
+index 729d629..ea741b3 100644
+--- a/include/net/netfilter/nf_flow_table.h
++++ b/include/net/netfilter/nf_flow_table.h
+@@ -199,6 +199,16 @@ struct flow_offload {
+ 	struct rcu_head				rcu_head;
+ };
+ 
++enum flow_offload_tnl {
++	FLOW_OFFLOAD_TNL_GRETAP,
++	FLOW_OFFLOAD_TNL_PPTP,
++	FLOW_OFFLOAD_TNL_L2TP_V2,
++	FLOW_OFFLOAD_TNL_L2TP_V3,
++	FLOW_OFFLOAD_TNL_VXLAN,
++	FLOW_OFFLOAD_TNL_NATT,
++	__FLOW_OFFLOAD_TNL_MAX,
++};
++
+ struct flow_offload_hw_path {
+ 	struct net_device *dev;
+ 	struct net_device *virt_dev;
+@@ -210,6 +220,7 @@ struct flow_offload_hw_path {
+ 	u16 vlan_id;
+ 	u16 pppoe_sid;
+ 	u16 dsa_port;
++	u32 tnl_type;
+ };
+ 
+ #define NF_FLOW_TIMEOUT (30 * HZ)

@@ -1,0 +1,34 @@
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] net: device: add ndo_flow_offload_stats64_add
+
+chasey 6.12 树的 999-hnat-14/15 给 vlan/ppp 增加
+ndo_flow_offload_stats64_add 回调，但 6.18 主线（以及
+immortalwrt 6.18 基线）的 struct net_device_ops 里没有这个成员，
+直接编译会报 no member named 'ndo_flow_offload_stats64_add'。
+这里补回成员声明与 kernel-doc，语义与 chasey 6.12 一致。
+---
+
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index b4357c3..8bb6128 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -1331,6 +1331,10 @@ struct flow_offload_hw_path;
+  *	underlying network device that can be used for offloading connections.
+  *	Return an error if offloading is not supported.
+  *
++ * int (*ndo_flow_offload_stats64_add)(struct net_device *dev,
++ *					const struct rtnl_link_stats64 *stats64);
++ *	Add hardware-offloaded flow counters to device software stats.
++ *
+  * int (*ndo_change_carrier)(struct net_device *dev, bool new_carrier);
+  *	Called to change device carrier. Soft-devices (like dummy, team, etc)
+  *	which do not represent real hardware may define this to allow their
+@@ -1630,6 +1634,8 @@ struct net_device_ops {
+ 						      struct nlmsghdr *nlh,
+ 						      u16 flags);
+ 	int			(*ndo_flow_offload_check)(struct flow_offload_hw_path *path);
++	int			(*ndo_flow_offload_stats64_add)(struct net_device *dev,
++							 const struct rtnl_link_stats64 *stats64);
+ 	int			(*ndo_change_carrier)(struct net_device *dev,
+ 						      bool new_carrier);
+ 	int			(*ndo_get_phys_port_id)(struct net_device *dev,

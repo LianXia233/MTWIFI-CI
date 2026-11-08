@@ -8,14 +8,14 @@ ap2woccif@151a5000 为上下文，而 6.18 的 mt7981b.dtsi（经
 节点默认 disabled，由设备 DTS 启用（见 port/repo）。
 ---
 
+diff --git a/arch/arm64/boot/dts/mediatek/mt7981b.dtsi b/arch/arm64/boot/dts/mediatek/mt7981b.dtsi
+index 102bdcf..cd07c83 100644
 --- a/arch/arm64/boot/dts/mediatek/mt7981b.dtsi
 +++ b/arch/arm64/boot/dts/mediatek/mt7981b.dtsi
-@@ -404,6 +404,15 @@
- 			reg = <0 0x15000000 0 0x1000>;
- 			#clock-cells = <1>;
+@@ -426,6 +426,15 @@
  			#reset-cells = <1>;
-+		};
-+
+ 		};
+ 
 +		hnat: hnat@15000000 {
 +			compatible = "mediatek,mtk-hnat_v4";
 +			reg = <0 0x15100000 0 0x80000>;
@@ -23,6 +23,8 @@ ap2woccif@151a5000 为上下文，而 6.18 的 mt7981b.dtsi（经
 +			reset-names = "mtketh";
 +			mtketh-soc = <&eth>;
 +			status = "disabled";
- 		};
- 
++		};
++
  		wed: wed@15010000 {
+ 			compatible = "mediatek,mt7981-wed",
+ 				     "mediatek,mt7986-wed",

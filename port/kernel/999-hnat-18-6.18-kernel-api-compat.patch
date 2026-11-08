@@ -1,0 +1,70 @@
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] mtk_hnat: adapt to 6.18 kernel APIs
+
+两处 6.15+ 的内核 API 变更，chasey 6.12 源码直接引用会编译失败：
+
+1. del_timer_sync() 在 6.15 改名 timer_delete_sync()（旧名已删除）。
+2. struct nf_conn 的 zone 成员只在 CONFIG_NF_CONNTRACK_ZONES=y 时存在；
+   改用 nf_ct_zone() 访问器，两种配置下都能编译。
+
+注意：第 2 点保持语义不变，只是把直接成员访问换成等价访问器。
+---
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+index e551b60..7227ea0 100755
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -1865,9 +1865,9 @@ static void hnat_remove(struct platform_device *pdev)
+ 
+ 	hnat_deinit_debugfs(hnat_priv);
+ 	hnat_release_netdev();
+-	del_timer_sync(&hnat_priv->hnat_sma_build_entry_timer);
++	timer_delete_sync(&hnat_priv->hnat_sma_build_entry_timer);
+ 	if (hnat_priv->data->version == MTK_HNAT_V1_3)
+-		del_timer_sync(&hnat_priv->hnat_reset_timestamp_timer);
++		timer_delete_sync(&hnat_priv->hnat_reset_timestamp_timer);
+ 
+ 	if (IS_HQOS_MODE && IS_GMAC1_MODE)
+ 		dev_remove_pack(&mtk_pack_type);
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
+index c0b7ece..fd02057 100755
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
+@@ -1503,7 +1503,7 @@ int hnat_mcast_disable(void)
+ 		return -EINVAL;
+ 
+ 	if (hnat_priv->data->version == MTK_HNAT_V1_3)
+-		del_timer_sync(&hnat_priv->hnat_mcast_check_timer);
++		timer_delete_sync(&hnat_priv->hnat_mcast_check_timer);
+ 
+ 	/* Disable multicast table lookup */
+ 	for (i = 0; i < CFG_PPE_NUM; i++)
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+index 43bf742..ed016ab 100755
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -26,6 +26,7 @@
+ #include <net/udp.h>
+ #include <net/netfilter/nf_conntrack.h>
+ #include <net/netfilter/nf_conntrack_acct.h>
++#include <net/netfilter/nf_conntrack_zones.h>
+ 
+ #include "nf_hnat_mtk.h"
+ #include "hnat_api.h"
+@@ -3145,7 +3146,7 @@ hnat_entry_bind:
+ 		       0, sizeof(struct hnat_accounting));
+ 		ct = nf_ct_get(skb, &ctinfo);
+ 		if (ct)
+-			hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)].zone = ct->zone;
++			hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)].zone = *nf_ct_zone(ct);
+ 	}
+ 
+ 	return 0;
+@@ -3500,7 +3501,7 @@ int mtk_sw_nat_hook_tx(struct sk_buff *skb, int gmac_no)
+ 			0, sizeof(struct hnat_accounting));
+ 		ct = nf_ct_get(skb, &ctinfo);
+ 		if (ct)
+-			hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)].zone = ct->zone;
++			hnat_priv->acct[skb_hnat_ppe(skb)][skb_hnat_entry(skb)].zone = *nf_ct_zone(ct);
+ 	}
+ 
+ #if defined(CONFIG_MEDIATEK_NETSYS_V3)

@@ -1,0 +1,57 @@
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] net: vxlan: report VXLAN tunnel path to hardware flow offload
+
+给 VXLAN 以太网口的 net_device_ops 增加 flow-offload 查询，输出隧道类型
+与承载设备。6.18 的 vxlan_core.c 增加了 netdev_lock.h 头与 mdb 系列
+回调，本补丁按现有结构落位。
+
+---
+diff --git a/drivers/net/vxlan/vxlan_core.c b/drivers/net/vxlan/vxlan_core.c
+--- a/drivers/net/vxlan/vxlan_core.c
++++ b/drivers/net/vxlan/vxlan_core.c
+@@ -27,6 +27,7 @@
+ #include <net/net_namespace.h>
+ #include <net/netns/generic.h>
+ #include <net/netdev_lock.h>
++#include <net/netfilter/nf_flow_table.h>
+ #include <net/tun_proto.h>
+ #include <net/vxlan.h>
+ #include <net/nexthop.h>
+@@ -3297,6 +3298,27 @@
+ 	return 0;
+ }
+ 
++#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
++/* VXLAN 的卸载路径与 GRETAP 同构：标记隧道类型，把真实出接口交给硬件，
++ * 虚拟口本身留在 virt_dev 里。重复标记说明外层已经处理过隧道，直接退出。
++ */
++static int vxlan_flow_offload_check(struct flow_offload_hw_path *path)
++{
++	struct net_device *dev = path->dev;
++	struct vxlan_dev *vxlan = netdev_priv(dev);
++
++	if (path->flags & BIT(DEV_PATH_TNL))
++		return -EEXIST;
++
++	path->flags |= BIT(DEV_PATH_TNL);
++	path->tnl_type = FLOW_OFFLOAD_TNL_VXLAN;
++	path->virt_dev = dev;
++	path->dev = vxlan->dev;
++
++	return 0;
++}
++#endif /* CONFIG_NF_FLOW_TABLE */
++
+ static const struct net_device_ops vxlan_netdev_ether_ops = {
+ 	.ndo_init		= vxlan_init,
+ 	.ndo_uninit		= vxlan_uninit,
+@@ -3318,6 +3340,9 @@
+ 	.ndo_mdb_dump		= vxlan_mdb_dump,
+ 	.ndo_mdb_get		= vxlan_mdb_get,
+ 	.ndo_fill_metadata_dst	= vxlan_fill_metadata_dst,
++#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
++	.ndo_flow_offload_check = vxlan_flow_offload_check,
++#endif
+ };
+ 
+ static const struct net_device_ops vxlan_netdev_raw_ops = {

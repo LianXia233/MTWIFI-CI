@@ -1,33 +1,46 @@
 From 096f1f857cdbc8412a4a00b834ab07d50d08dd2e Mon Sep 17 00:00:00 2001
 From: "chak-kei.lam" <chak-kei.lam@mediatek.com>
 Date: Thu, 5 Feb 2026 10:23:31 +0800
-Subject: [PATCH] net: ethernet: mtk_eth_soc: add mtkhnat driver support
+Subject: [PATCH] net: ethernet: mediatek: add mtkhnat driver support
 
-6.18 适配：错误路径在 6.18 已重构，6.12 的
-free_netdev(eth->dummy_dev) / mtk_napi_del() / mtk_release_all_muxes()
-三个上下文行不存在，原 hunk 8 整体失败。此处改用最小上下文锚定
-err_deinit_ppe 标签，仅保留 HNAT 接管 PPE 生命周期的条件编译。
+6.18 适配（本仓库维护，非上游原样）：
+
+1. 行号与上下文全部按 linux-6.18.55 + immortalwrt 主线重算，不再依赖 fuzz。
+   原补丁以 chasey 6.12 的 mtk_eth_soc.c 为基准，hunk 里出现的
+   eth->hwlro/hwlro_stats、mtk_napi_del()、mtk_release_all_muxes()、
+   free_netdev(eth->dummy_dev) 等上下文在 6.18 都不存在。
+2. rxd7 的三个访问宏（RX_DMA_GET_CDRT / RX_DMA_GET_TOPS_ENTRY /
+   TOPS_ENTRY_PPE_UN_HIT）在 chasey 树里由 999-eth-39 定义；6.18 主线没有该
+   补丁，而 HNAT 的 mtk_poll_rx() 钩子要用，故就地补上，取值与 999-eth-39 一致。
+3. HNAT 接管 PPE 生命周期，mtk_open/mtk_stop/mtk_probe/err_deinit_ppe 四处
+   的 PPE 启停与 PPE 检查逻辑在 HNAT 使能时排除，与 chasey 6.12 版本语义相同。
+4. MEDIATEK_NETSYS_V2/V3 由 tristate 改成 bool：供应商源码里遍布
+   #if defined(CONFIG_MEDIATEK_NETSYS_V2) 的布局分支（hnat.h 的 PPE 表项
+   结构、tport 编号、RX 描述符解读都按代际分叉）。若该符号是 tristate，
+   在 NET_MEDIATEK_SOC=m 的配置下 kconfig 会把依赖降级成 m，autoconf.h 里
+   只剩 CONFIG_MEDIATEK_NETSYS_V2_MODULE，defined() 分支全部失效，结果是
+   "编译通过、寄存器布局却按 V1 解读"。实测：tristate 时 autoconf 只有
+   _MODULE，改 bool 后为 CONFIG_MEDIATEK_NETSYS_V2=y。文末的验证脚本
+   Scripts/verify-port.sh 也据此断言这两代必须出现 =y。
 
 ---
- drivers/net/ethernet/mediatek/Kconfig       | 24 +++++++++++++
- drivers/net/ethernet/mediatek/Makefile      |  1 +
- drivers/net/ethernet/mediatek/mtk_eth_soc.c | 61 +++++++++++++++++++++++++++++++
- 3 files changed, 86 insertions(+)
 
+diff --git a/drivers/net/ethernet/mediatek/Kconfig b/drivers/net/ethernet/mediatek/Kconfig
+index 64909b0..c64bb07 100644
 --- a/drivers/net/ethernet/mediatek/Kconfig
 +++ b/drivers/net/ethernet/mediatek/Kconfig
-@@ -32,4 +32,28 @@ config NET_MEDIATEK_STAR_EMAC
+@@ -33,4 +33,28 @@ config NET_MEDIATEK_STAR_EMAC
  	  This driver supports the ethernet MAC IP first used on
  	  MediaTek MT85** SoCs.
  
 +config MEDIATEK_NETSYS_V2
-+	tristate "MediaTek Ethernet NETSYS V2 support"
++	bool "MediaTek Ethernet NETSYS V2 support"
 +	depends on ARCH_MEDIATEK && NET_MEDIATEK_SOC
 +	help
 +	  This options enable MTK Ethernet NETSYS V2 support
 +
 +config MEDIATEK_NETSYS_V3
-+	tristate "MediaTek Ethernet NETSYS V3 support"
++	bool "MediaTek Ethernet NETSYS V3 support"
 +	depends on ARCH_MEDIATEK && NET_MEDIATEK_SOC
 +	help
 +	  This options enable MTK Ethernet NETSYS V3 support for
@@ -45,31 +58,42 @@ err_deinit_ppe 标签，仅保留 HNAT 接管 PPE 生命周期的条件编译。
 +	  family.
 +
  endif #NET_VENDOR_MEDIATEK
+diff --git a/drivers/net/ethernet/mediatek/Makefile b/drivers/net/ethernet/mediatek/Makefile
+index 03e008f..73e6460 100644
 --- a/drivers/net/ethernet/mediatek/Makefile
 +++ b/drivers/net/ethernet/mediatek/Makefile
-@@ -11,3 +11,4 @@ mtk_eth-$(CONFIG_NET_MEDIATEK_SOC_WED) +
+@@ -11,3 +11,4 @@ mtk_eth-$(CONFIG_NET_MEDIATEK_SOC_WED) += mtk_wed_debugfs.o
  endif
  obj-$(CONFIG_NET_MEDIATEK_SOC_WED) += mtk_wed_ops.o
  obj-$(CONFIG_NET_MEDIATEK_STAR_EMAC) += mtk_star_emac.o
 +obj-$(CONFIG_NET_MEDIATEK_HNAT) += mtk_hnat/
+diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+index 680f8ad..8cde184 100644
 --- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 +++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
-@@ -40,6 +40,10 @@
- #include "mtk_eth_reset.h"
+@@ -38,6 +38,18 @@
+ #include "mtk_eth_soc.h"
  #include "mtk_wed.h"
  
 +#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
 +#include "mtk_hnat/nf_hnat_mtk.h"
++
++/*
++ * 6.18 主线没有 chasey 999-eth-39 引入的 rxd7 访问宏，HNAT 卸载路径要在
++ * mtk_poll_rx() 中解析 rxd7（CDRT / TOPS entry），取值与该补丁一致。
++ */
++#define RX_DMA_GET_CDRT(x)		(((x) >> 8) & 0xff)
++#define RX_DMA_GET_TOPS_ENTRY(x)	((x) & 0x3f)
++#define TOPS_ENTRY_PPE_UN_HIT		25
 +#endif
 +
  static int mtk_msg_level = -1;
  module_param_named(msg_level, mtk_msg_level, int, 0);
  MODULE_PARM_DESC(msg_level, "Message level (-1=defaults,0=none,...,16=all)");
-@@ -2954,6 +2958,53 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2596,6 +2608,52 @@ static int mtk_poll_rx(struct napi_struct *napi, int budget,
  
  			skb_reserve(skb, NET_SKB_PAD + NET_IP_ALIGN);
  			skb_put(skb, pktlen);
-+
 +#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
 +			if (mtk_is_netsys_v3_or_greater(eth))
 +				*(u32 *)(skb->head) = trxd.rxd5;
@@ -119,7 +143,7 @@ err_deinit_ppe 标签，仅保留 HNAT 接管 PPE 生命周期的条件编译。
  		}
  
  		skb->dev = netdev;
-@@ -2996,8 +3047,10 @@ static int mtk_poll_rx(struct napi_struc
+@@ -2635,8 +2693,10 @@ static int mtk_poll_rx(struct napi_struct *napi, int budget,
  				skb_dst_set_noref(skb, &eth->dsa_meta[port]->dst);
  		}
  
@@ -128,11 +152,11 @@ err_deinit_ppe 标签，仅保留 HNAT 接管 PPE 生命周期的条件编译。
  			mtk_ppe_check_skb(eth->ppe[ppe_idx], skb, hash);
 +#endif
  
- 		if (eth->hwlro && eth->debugfs->hwlro_stats.ebl &&
- 		    IS_HW_LRO_RING(ring->ring_no)) {
-@@ -4763,8 +4816,10 @@ static int mtk_open(struct net_device *d
- 		if (err)
+ 		skb_record_rx_queue(skb, 0);
+ 		napi_gro_receive(napi, skb);
+@@ -3942,8 +4002,10 @@ static int mtk_open(struct net_device *dev)
  			return err;
+ 		}
  
 +#if !defined(CONFIG_NET_MEDIATEK_HNAT) && !defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
  		for (i = 0; i < ARRAY_SIZE(eth->ppe); i++)
@@ -141,7 +165,7 @@ err_deinit_ppe 标签，仅保留 HNAT 接管 PPE 生命周期的条件编译。
  
  		for (i = 0; i < MTK_MAX_DEVS; i++) {
  			if (!eth->netdev[i])
-@@ -4938,8 +4993,10 @@ static int mtk_stop(struct net_device *d
+@@ -4071,8 +4133,10 @@ static int mtk_stop(struct net_device *dev)
  
  	mtk_dma_free(eth);
  
@@ -152,25 +176,29 @@ err_deinit_ppe 标签，仅保留 HNAT 接管 PPE 生命周期的条件编译。
  
  	return 0;
  }
-@@ -7581,6 +7638,7 @@ static int mtk_probe(struct platform_dev
- 		};
+@@ -5847,6 +5911,7 @@ static int mtk_probe(struct platform_device *pdev)
+ 			goto err_free_dev;
  	}
  
 +#if !defined(CONFIG_NET_MEDIATEK_HNAT) && !defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
  	if (eth->soc->offload_version) {
  		u8 ppe_num = eth->soc->ppe_num;
  
-@@ -7605,6 +7663,7 @@ static int mtk_probe(struct platform_dev
- 		if (err)
- 			goto err_deinit_ppe;
+@@ -5867,6 +5932,7 @@ static int mtk_probe(struct platform_device *pdev)
+ 				goto err_deinit_ppe;
+ 		}
  	}
 +#endif
  
- 	mtk_eth_debugfs_init(eth);
- 
-@@ -5303,2 +5303,4 @@
+ 	for (i = 0; i < MTK_MAX_DEVS; i++) {
+ 		if (!eth->netdev[i])
+@@ -5905,7 +5971,9 @@ static int mtk_probe(struct platform_device *pdev)
+ err_unreg_netdev:
+ 	mtk_unreg_dev(eth);
  err_deinit_ppe:
 +#if !defined(CONFIG_NET_MEDIATEK_HNAT) && !defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
  	mtk_ppe_deinit(eth);
 +#endif
  	mtk_mdio_cleanup(eth);
+ err_free_dev:
+ 	mtk_free_dev(eth);

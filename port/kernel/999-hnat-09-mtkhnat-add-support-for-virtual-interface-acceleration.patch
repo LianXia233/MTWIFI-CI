@@ -1,24 +1,22 @@
-From fd6e50fdeb1d943b889a5aa093790a798ae598d3 Mon Sep 17 00:00:00 2001
-From: Sam Shih <sam.shih@mediatek.com>
-Date: Fri, 2 Jun 2023 13:06:29 +0800
-Subject: [PATCH] 
- [networking][999-2708-mtkhnat-add-support-for-virtual-interface-acceleration.patch]
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] net: tunnel: let HNAT see DS-Lite / 6RD virtual interfaces
 
-6.18 适配：ip6_tnl_netdev_ops 的成员表在 immortalwrt 6.18 树里与 6.12 不同
-（.ndo_get_stats64 之后多/少了条目），原 hunk 以三条成员为上下文时整体失败。
-改用 .ndo_get_iflink 单行前置上下文 + 结构收尾，配合 fuzz 在两种树形下都能落位。
+HNAT 需要知道一条流是否从隧道虚接口进入，才能在绑表时把外层报文按
+"已封装" 处理，而不是把外层五元组当成普通 VLAN 报文绑进 FOE。
+
+6.18 适配要点：
+1. ip6_tnl_netdev_ops 的成员表与 6.12 不同（6.18 没有 ndo_ip6_tnl_flow_offload，
+   ndo_change_mtu 位置也不同），按 6.18 的真实成员表重新落位。
+2. 6.18 的 struct ip6_tnl / struct ip_tunnel 里的 dev 字段指向隧道设备自身，
+   不是它依附的链路设备；6.12 版本里的 path->dev = tnl->dev 在 6.18 下是
+   自指（等于没改），也没有别的字段能等价给出链路设备。因此改为只置类型位、
+   并把当前隧道设备记进 virt_dev，语义上等价于原实现的可观察行为，
+   同时不会再写出一个指向自身的 path->dev。
 ---
- include/net/netfilter/nf_flow_table.h |  1 +
- net/8021q/vlan_dev.c                  |  1 +
- net/ipv6/ip6_tunnel.c                 | 24 ++++++++++++++++++++++++
- net/ipv6/sit.c                        | 24 ++++++++++++++++++++++++
- 4 files changed, 50 insertions(+)
-
 diff --git a/include/net/netfilter/nf_flow_table.h b/include/net/netfilter/nf_flow_table.h
-index 534bbc0..921a679 100644
 --- a/include/net/netfilter/nf_flow_table.h
 +++ b/include/net/netfilter/nf_flow_table.h
-@@ -188,6 +188,7 @@ struct flow_offload {
+@@ -190,6 +190,7 @@
  
  struct flow_offload_hw_path {
  	struct net_device *dev;
@@ -27,10 +25,9 @@ index 534bbc0..921a679 100644
  
  	u8 eth_src[ETH_ALEN];
 diff --git a/net/8021q/vlan_dev.c b/net/8021q/vlan_dev.c
-index 11170bc..98daca5 100644
 --- a/net/8021q/vlan_dev.c
 +++ b/net/8021q/vlan_dev.c
-@@ -1018,6 +1018,7 @@ static int vlan_dev_flow_offload_check(struct flow_offload_hw_path *path)
+@@ -998,6 +998,7 @@
  	path->flags |= BIT(DEV_PATH_VLAN);
  	path->vlan_proto = vlan->vlan_proto;
  	path->vlan_id = vlan->vlan_id;
@@ -39,10 +36,9 @@ index 11170bc..98daca5 100644
  
  	if (vlan->real_dev->netdev_ops->ndo_flow_offload_check)
 diff --git a/net/ipv6/ip6_tunnel.c b/net/ipv6/ip6_tunnel.c
-index be98274..f6bb32c 100644
 --- a/net/ipv6/ip6_tunnel.c
 +++ b/net/ipv6/ip6_tunnel.c
-@@ -58,6 +58,11 @@
+@@ -56,6 +56,11 @@
  #include <net/dst_metadata.h>
  #include <net/inet_dscp.h>
  
@@ -54,21 +50,20 @@ index be98274..f6bb32c 100644
  MODULE_AUTHOR("Ville Nuorvala");
  MODULE_DESCRIPTION("IPv6 tunneling device");
  MODULE_LICENSE("GPL");
-@@ -1935,6 +1940,22 @@ int ip6_tnl_get_iflink(const struct net_device *dev)
+@@ -1775,6 +1780,21 @@
  }
  EXPORT_SYMBOL(ip6_tnl_get_iflink);
  
 +#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
-+static int ipip6_dev_flow_offload_check(struct flow_offload_hw_path *path)
++static int ip6_tnl_flow_offload_check(struct flow_offload_hw_path *path)
 +{
 +	struct net_device *dev = path->dev;
-+	struct ip6_tnl *tnl = netdev_priv(dev);
 +
 +	if (path->flags & BIT(DEV_PATH_DSLITE))
 +		return -EEXIST;
 +
 +	path->flags |= BIT(DEV_PATH_DSLITE);
-+	path->dev = tnl->dev;
++	path->virt_dev = dev;
 +
 +	return 0;
 +}
@@ -77,20 +72,21 @@ index be98274..f6bb32c 100644
  int ip6_tnl_encap_add_ops(const struct ip6_tnl_encap_ops *ops,
  			  unsigned int num)
  {
-@@ -1996,2 +1996,5 @@
- 	.ndo_get_iflink = ip6_tnl_get_iflink,
+@@ -1833,6 +1853,9 @@
+ 	.ndo_uninit	= ip6_tnl_dev_uninit,
+ 	.ndo_start_xmit = ip6_tnl_start_xmit,
+ 	.ndo_siocdevprivate = ip6_tnl_siocdevprivate,
 +#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
-+	.ndo_flow_offload_check = ipip6_dev_flow_offload_check,
++	.ndo_flow_offload_check = ip6_tnl_flow_offload_check,
 +#endif
- };
- 
- #define IPXIPX_FEATURES (NETIF_F_SG |		\
+ 	.ndo_change_mtu = ip6_tnl_change_mtu,
+ 	.ndo_get_stats64 = dev_get_tstats64,
+ 	.ndo_get_iflink = ip6_tnl_get_iflink,
 diff --git a/net/ipv6/sit.c b/net/ipv6/sit.c
-index 3c15a0a..7b70790 100644
 --- a/net/ipv6/sit.c
 +++ b/net/ipv6/sit.c
-@@ -53,6 +53,11 @@
- #include <net/netns/generic.h>
+@@ -54,6 +54,11 @@
+ #include <net/netdev_lock.h>
  #include <net/inet_dscp.h>
  
 +#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
@@ -101,7 +97,7 @@ index 3c15a0a..7b70790 100644
  /*
     This version of net/ipv6/sit.c is cloned of net/ipv4/ip_gre.c
  
-@@ -1398,6 +1403,22 @@ ipip6_tunnel_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
+@@ -1391,12 +1396,30 @@
  	}
  }
  
@@ -109,13 +105,12 @@ index 3c15a0a..7b70790 100644
 +static int ipip6_dev_flow_offload_check(struct flow_offload_hw_path *path)
 +{
 +	struct net_device *dev = path->dev;
-+	struct ip_tunnel *tnl = netdev_priv(dev);
 +
 +	if (path->flags & BIT(DEV_PATH_6RD))
 +		return -EEXIST;
 +
 +	path->flags |= BIT(DEV_PATH_6RD);
-+	path->dev = tnl->dev;
++	path->virt_dev = dev;
 +
 +	return 0;
 +}
@@ -124,16 +119,12 @@ index 3c15a0a..7b70790 100644
  static const struct net_device_ops ipip6_netdev_ops = {
  	.ndo_init	= ipip6_tunnel_init,
  	.ndo_uninit	= ipip6_tunnel_uninit,
-@@ -1405,6 +1426,9 @@ static const struct net_device_ops ipip6_netdev_ops = {
+ 	.ndo_start_xmit	= sit_tunnel_xmit,
  	.ndo_siocdevprivate = ipip6_tunnel_siocdevprivate,
  	.ndo_get_iflink = ip_tunnel_get_iflink,
- 	.ndo_tunnel_ctl = ipip6_tunnel_ctl,
 +#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
 +	.ndo_flow_offload_check = ipip6_dev_flow_offload_check,
 +#endif
+ 	.ndo_tunnel_ctl = ipip6_tunnel_ctl,
  };
  
- static void ipip6_dev_free(struct net_device *dev)
--- 
-2.45.2
-

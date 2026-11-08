@@ -1,0 +1,97 @@
+From: MTWIFI-CI port <port@localhost>
+Subject: [PATCH] net: l2tp: report PPPoL2TP session type to hardware flow offload
+
+PPPoL2TP 会话经 ppp 通道送出，硬件需要知道这条流属于哪种隧道才能选对
+TOPS 表项（L2TPv2 与 L2TPv3 是两个独立条目，索引 = 类型 + 1）。这里实现
+ppp_channel_ops.flow_offload_check，由 ppp_generic 的遍历回调调用。
+
+6.18 适配要点：
+- session->tunnel 在会话注册过程中可能仍为 NULL（l2tp_core.c 里对此有
+  明确说明），所以先取一次快照再判空，避免空指针。
+- 版本号在 struct l2tp_tunnel 上（不是 session 上），因此必须经 tunnel 读。
+- 同时在发送核心重置 inner header 指针，使封装前后解析同一份内层头。
+---
+diff --git a/net/l2tp/l2tp_core.c b/net/l2tp/l2tp_core.c
+--- a/net/l2tp/l2tp_core.c
++++ b/net/l2tp/l2tp_core.c
+@@ -1232,6 +1232,10 @@
+ 	struct inet_sock *inet;
+ 	struct udphdr *uh;
+ 
++#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
++	skb_reset_inner_headers(skb);
++#endif
++
+ 	/* Check that there's enough headroom in the skb to insert IP,
+ 	 * UDP and L2TP headers. If not enough, expand it to
+ 	 * make room. Adjust truesize.
+diff --git a/net/l2tp/l2tp_ppp.c b/net/l2tp/l2tp_ppp.c
+--- a/net/l2tp/l2tp_ppp.c
++++ b/net/l2tp/l2tp_ppp.c
+@@ -89,6 +89,7 @@
+ #include <linux/nsproxy.h>
+ #include <net/net_namespace.h>
+ #include <net/netns/generic.h>
++#include <net/netfilter/nf_flow_table.h>
+ #include <net/ip.h>
+ #include <net/udp.h>
+ #include <net/inet_common.h>
+@@ -123,8 +124,16 @@
+ 
+ static int pppol2tp_xmit(struct ppp_channel *chan, struct sk_buff *skb);
+ 
++#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
++static int l2tp_ppp_flow_offload_check(struct ppp_channel *chan,
++				       struct flow_offload_hw_path *path);
++#endif /* CONFIG_NF_FLOW_TABLE */
++
+ static const struct ppp_channel_ops pppol2tp_chan_ops = {
+ 	.start_xmit =  pppol2tp_xmit,
++#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
++	.flow_offload_check = l2tp_ppp_flow_offload_check,
++#endif /* CONFIG_NF_FLOW_TABLE */
+ };
+ 
+ static const struct proto_ops pppol2tp_ops;
+@@ -312,6 +321,41 @@
+ 	return error;
+ }
+ 
++#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
++/* PPPoL2TP 的 ppp 通道背后是 UDP 套接字，会话版本决定硬件该用哪一代
++ * L2TP 表项（L2TPv2 与 L2TPv3 在 TOPS 表里是两个独立条目）。
++ */
++static int l2tp_ppp_flow_offload_check(struct ppp_channel *chan,
++				       struct flow_offload_hw_path *path)
++{
++	struct sock *sk = chan->private;
++	struct l2tp_session *session;
++	struct l2tp_tunnel *tunnel;
++
++	if (path->flags & BIT(DEV_PATH_TNL))
++		return -EEXIST;
++
++	session = pppol2tp_sock_to_session(sk);
++	if (!session)
++		return -EINVAL;
++
++	/* 会话注册过程中 tunnel 指针可能仍为 NULL，先取快照再判断 */
++	tunnel = READ_ONCE(session->tunnel);
++	if (!tunnel) {
++		l2tp_session_put(session);
++		return -EINVAL;
++	}
++
++	path->flags |= BIT(DEV_PATH_TNL);
++	path->tnl_type = tunnel->version == 3 ?
++			 FLOW_OFFLOAD_TNL_L2TP_V3 : FLOW_OFFLOAD_TNL_L2TP_V2;
++
++	l2tp_session_put(session);
++
++	return 0;
++}
++#endif /* CONFIG_NF_FLOW_TABLE */
++
+ /* Transmit function called by generic PPP driver.  Sends PPP frame
+  * over PPPoL2TP socket.
+  *

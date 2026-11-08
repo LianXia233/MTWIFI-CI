@@ -1,0 +1,26 @@
+From: "MTWIFI-CI porting layer" <noreply@example.invalid>
+Subject: [PATCH] net: ethernet: mediatek: drop the mtk_eth_dbg.h include in mtk_hnat
+
+hnat_debugfs.c 唯一一处 vendor-only 依赖是 #include "../mtk_eth_dbg.h"，
+而 mtk_eth_dbg.h / mtk_eth_dbg.c 是 MTK 调试框架的一部分，6.18 主线树里
+没有这个文件，直接包含会让编译在预处理阶段失败。
+
+核对过整个 mtk_hnat 目录：mtk_eth_dbg.h 里声明的符号（mtk_eth_dbg_init、
+mtk_eth_dbg_exit、mtk_dbg_do_sw_frag_reset 等）在 hnat 源码中都没有被引用，
+文件自己用的 dbg_entry_state / dbg_cpu_reason 等都是本文件定义的全局量，
+因此只删这一行 include，不需要额外提供兼容头。
+
+mtk_eth_reset.h 的 include 保留不动：该头由 999-hnat-23 一并补齐，
+hnat_nf_hook.c 依赖其中的 MTK_FE_RESET_NAT_DONE 事件号。
+---
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -27,7 +27,6 @@
+ #include "hnat_api.h"
+ #include "nf_hnat_mtk.h"
+ #include "../mtk_eth_soc.h"
+-#include "../mtk_eth_dbg.h"
+ 
+ int dbg_entry_state = BIND;
+ typedef int (*debugfs_write_func)(int par1);

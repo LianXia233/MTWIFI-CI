@@ -1,0 +1,35 @@
+Subject: [PATCH] net: ethernet: mediatek: 外接设备报文固定从 PSE 第三口转发
+
+6.18 适配（本仓库维护）：
+
+HNAT 给"从外接设备进来、要转出去"的报文在 skb 控制块里打了 magic 标记，
+这类报文不能按 skb->dev 对应的 GDM 口发出，必须落到 PSE 的第三个转发口，
+由硬件按会话表做后续处理。
+
+6.18 的 mtk_tx_map() 已改成先把描述符字段汇总到 txd_info 再一次性写入，
+所以覆盖点放在 mtk_tx_set_dma_desc() 之后、描述符入环之前，只改 v2 描述符
+布局里的 fport 位段。
+
+---
+
+diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -1632,6 +1632,17 @@
+ 
+ 	mtk_tx_set_dma_desc(dev, itxd, &txd_info);
+ 
++#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
++	/*
++	 * 带 HNAT magic 标记的报文来自外接设备侧，出口固定为 PSE 第三口，
++	 * 覆盖描述符里按 mac id 推出的默认转发口。
++	 */
++	if (HNAT_SKB_CB2(skb)->magic == HNAT_MAGIC_TAG) {
++		itxd->txd4 &= ~(TX_DMA_FPORT_MASK_V2 << TX_DMA_FPORT_SHIFT_V2);
++		itxd->txd4 |= 0x3 << TX_DMA_FPORT_SHIFT_V2;
++	}
++#endif
++
+ 	itx_buf->flags |= MTK_TX_FLAGS_SINGLE0;
+ 	itx_buf->mac_id = mac->id;
+ 	setup_tx_buf(eth, itx_buf, itxd_pdma, txd_info.addr, txd_info.size,
