@@ -1,0 +1,75 @@
+From: "MTWIFI-CI porting layer" <noreply@example.invalid>
+Subject: [PATCH] mtk_hnat: read QDMA TX queue count from SoC description
+
+6.18 把 QDMA 的 TX 队列数从全局宏改成 struct mtk_soc_data::num_tx_queues，
+寄存器按 MTK_QTX_PER_PAGE 分页访问。HNAT 侧还有三处引用已不存在的
+MTK_QDMA_NUM_QUEUES：
+
+  hnat_nf_hook.c  给硬件卸载的报文挑 TX 队列时把它当上界
+  hnat_debugfs.c  建 qdma_txqN 调试链接时把它当循环上界
+  hnat_api.c      设置 HQOS 队列号时用它做范围校验
+
+一律改为读 SoC 描述的真实队列数。驱动尚未完成初始化（hnat_priv 或 eth
+为空）时回退到页内队列数，避免早期调用解引用空指针。
+---
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.h
+@@ -1476,6 +1476,21 @@
+ extern const struct of_device_id of_hnat_match[];
+ extern struct mtk_hnat *hnat_priv;
+ 
++/*
++ * 6.18 用 struct mtk_soc_data::num_tx_queues 描述 QDMA TX 队列总数，
++ * 旧的全局宏已移除；MTK_QTX_PER_PAGE 只是一个寄存器页窗口内的队列数。
++ * 选队列、建调试节点、校验 qid 都需要真实总数。
++ */
++static inline u16 mtk_hnat_num_tx_queues(void)
++{
++	struct mtk_eth *eth = hnat_priv ? hnat_priv->eth : NULL;
++
++	if (eth && eth->soc && eth->soc->num_tx_queues)
++		return eth->soc->num_tx_queues;
++
++	return MTK_QTX_PER_PAGE;
++}
++
+ extern struct net_device *g_rx_ppdev;
+ 
+ int hnat_dsa_fill_stag(const struct net_device *netdev,
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_api.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_api.c
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_api.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_api.c
+@@ -419,7 +419,7 @@
+ 	if (!d || !entry)
+ 		return HNAT_FAIL;
+ 
+-	if (d->qid >= MTK_QDMA_NUM_QUEUES)
++	if (d->qid >= mtk_hnat_num_tx_queues())
+ 		return HNAT_FAIL;
+ 
+ 	fqos = (d->fqos) ? 1 : 0;
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_debugfs.c
+@@ -4371,7 +4371,7 @@
+ 		debugfs_create_symlink(name, root, name_symlink);
+ 	}
+ 
+-	for (i = 0; i < MTK_QDMA_NUM_QUEUES; i++) {
++	for (i = 0; i < mtk_hnat_num_tx_queues(); i++) {
+ 		ret = snprintf(name, sizeof(name), "qdma_txq%ld", i);
+ 		if (ret != strlen(name)) {
+ 			ret = -ENOMEM;
+diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+--- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
++++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c
+@@ -786,7 +786,7 @@
+ 		return -ENETDOWN;
+ 	}
+ 
+-	queue = min_t(u16, MTK_QDMA_NUM_QUEUES - 1,
++	queue = min_t(u16, mtk_hnat_num_tx_queues() - 1,
+ 		      dev->real_num_tx_queues - 1);
+ 	skb->dev = dev;
+ 	skb_set_queue_mapping(skb, queue);

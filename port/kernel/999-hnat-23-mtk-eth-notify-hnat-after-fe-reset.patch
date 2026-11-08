@@ -42,7 +42,7 @@ new file mode 100644
 diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 --- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 +++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
-@@ -31,6 +31,7 @@
+@@ -37,6 +37,7 @@
  
  #include "mtk_eth_soc.h"
  #include "mtk_wed.h"
@@ -50,7 +50,7 @@ diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/
  
  #if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
  #include "mtk_hnat/nf_hnat_mtk.h"
-@@ -4511,6 +4512,20 @@
+@@ -4890,6 +4891,20 @@
  				     eth->dev->pins->default_state);
  	mtk_hw_init(eth, true);
  

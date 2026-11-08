@@ -72,12 +72,12 @@ mtwifi.yml（调度：每周一 05:00 CST 自动 / 手动 dispatch）
 3. 在 `port/kernel/`、`port/mtk/` 写正式适配补丁并提交；
 4. 下一轮构建自动以严格模式应用——收敛一个固化一个。
 
-> 当前进度：HNAT 全系列 40 条补丁已在 linux-6.18.55 树上 `--fuzz=0` 逐条命中，
-> 17 个关键对象用 aarch64 交叉工具链编译通过（含隧道卸载、FE 复位重建、
-> rx ppd 直通、外接设备 ingress）。仍待收敛的是 mt_wifi/mt_wifi7 的 os_glue 与
-> conninfra/warp 内核接口、WED 与主线 `mtk_wed` 的符号面、DTS hnat/wed 绑定，
-> 以及 QDMA 64 队列与外接交换机 tagger（6.18 无对应寄存器/驱动，理由见
-> [port/README.md](port/README.md)）。
+> 当前进度：HNAT 全系列 41 条补丁在做完基线补丁叠加的真实 6.18.55 树上
+> `--fuzz=0` 逐条命中，17 个关键对象用 aarch64 交叉工具链编译通过（含隧道卸载、
+> FE 复位重建、rx ppd 直通、外接设备 ingress、按 SoC 的 QDMA 队列数）。仍待收敛
+> 的是 mt_wifi/mt_wifi7 的 os_glue 与 conninfra/warp 内核接口、WED 与主线
+> `mtk_wed` 的符号面、DTS hnat/wed 绑定，以及外接交换机 tagger 的完整驱动
+> （6.18 只提供 tagger 接口，见 [port/README.md](port/README.md)）。
 
 ## 使用
 

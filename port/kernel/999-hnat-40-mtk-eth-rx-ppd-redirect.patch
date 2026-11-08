@@ -18,7 +18,7 @@ GDM 网卡，而属于外部设备直通口，需要交还给 HNAT 指定的 rx 
 diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 --- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 +++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
-@@ -299,6 +299,10 @@
+@@ -313,6 +313,10 @@
  	"top_netsys_warp_sel",
  };
  
@@ -29,7 +29,7 @@ diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/
  void mtk_w32(struct mtk_eth *eth, u32 val, unsigned reg)
  {
  	__raw_writel(val, eth->base + reg);
-@@ -2235,12 +2239,17 @@
+@@ -2493,12 +2497,17 @@
  	int done = 0, bytes = 0;
  	dma_addr_t dma_addr = DMA_MAPPING_ERROR;
  	int ppe_idx = 0;
@@ -47,7 +47,7 @@ diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/
  
  		ring = mtk_get_rx_ring(eth);
  		if (unlikely(!ring))
-@@ -2255,12 +2264,12 @@
+@@ -2513,30 +2522,55 @@
  
  		/* find out which mac the packet come from. values start at 1 */
  		if (mtk_is_netsys_v3_or_greater(eth)) {
@@ -63,47 +63,51 @@ diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/
  				break;
  			case PSE_GDM3_PORT:
  				mac = MTK_GMAC3_ID;
-@@ -2270,7 +2279,20 @@
+ 				break;
++			case PSE_QDMA_TX_PORT:
++			case PSE_WDMA0_PORT:
++			case PSE_WDMA1_PORT:
++			case PSE_WDMA2_PORT:
++				to_ppd = true;
++				break;
+ 			default:
+ 				break;
  			}
  		} else if (!MTK_HAS_CAPS(eth->soc->caps, MTK_SOC_MT7628) &&
  			   !(trxd.rxd4 & RX_DMA_SPECIAL_TAG)) {
 -			mac = RX_DMA_GET_SPORT(trxd.rxd4) - 1;
 +			sport = RX_DMA_GET_SPORT(trxd.rxd4);
 +			mac = sport - 1;
-+		}
 +
++			if (sport == PSE_QDMA_TX_PORT ||
++			    sport == PSE_WDMA0_PORT ||
++			    sport == PSE_WDMA1_PORT ||
++			    sport == PSE_WDMA2_PORT)
++				to_ppd = true;
+ 		}
+ 
+-		if (unlikely(mac < 0 || mac >= MTK_MAX_DEVS ||
+-			     !eth->netdev[mac]))
 +		/*
-+		 * 从 QDMA TX 端口收回的报文是 CPU 自己送出去的，没有对应 GDM 网卡，
-+		 * 只能交给 rx ppd 设备；没有该设备时丢弃。
++		 * 从 QDMA TX 口收回的报文是 CPU 自己发出的，从 WDMA 口回来的报文
++		 * 由 WED 卸载，两者都没有对应的 GDM 网卡；它们只能交给 rx ppd
++		 * 设备。该设备由 HNAT 在使能 rx ppd 时注册，未注册时丢弃。
 +		 */
-+		if (unlikely(sport == PSE_QDMA_TX_PORT)) {
-+			if (unlikely(!rx_ppdev))
++		if (unlikely(to_ppd && !rx_ppdev))
+ 			goto release_desc;
+ 
+-		netdev = eth->netdev[mac];
+-		ppe_idx = eth->mac[mac]->ppe_idx;
++		if (unlikely(to_ppd)) {
++			netdev = rx_ppdev;
++		} else {
++			if (unlikely(mac < 0 || mac >= MTK_MAX_DEVS ||
++				     !eth->netdev[mac]))
 +				goto release_desc;
 +
-+			mac = PSE_GDM1_PORT - 1;
-+			to_ppd = true;
- 		}
++			netdev = eth->netdev[mac];
++			ppe_idx = eth->mac[mac]->ppe_idx;
++		}
  
- 		if (unlikely(mac < 0 || mac >= MTK_MAX_DEVS ||
-@@ -2384,6 +2406,11 @@
- 				trace_printk("[%s] reason=0x%x(force to CPU) from WAN to Ext\n",
- 					     __func__, skb_hnat_reason(skb));
- 				skb->pkt_type = PACKET_HOST;
-+				if (likely(rx_ppdev) &&
-+				    (skb_hnat_sport(skb) == PSE_WDMA0_PORT ||
-+				     skb_hnat_sport(skb) == PSE_WDMA1_PORT ||
-+				     skb_hnat_sport(skb) == PSE_WDMA2_PORT))
-+					to_ppd = true;
- 			}
- 
- 			/* With slow path rate limit enabled, packets take
-@@ -2413,6 +2440,9 @@
- #endif
- 		}
- 
-+		if (unlikely(to_ppd))
-+			netdev = rx_ppdev;
-+
- 		skb->dev = netdev;
- 		bytes += skb->len;
- 
+ 		if (unlikely(test_bit(MTK_RESETTING, &eth->state)))
+ 			goto release_desc;

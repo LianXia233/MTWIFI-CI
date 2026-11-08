@@ -16,7 +16,7 @@ HNAT 需要知道一条流是否从隧道虚接口进入，才能在绑表时把
 diff --git a/include/net/netfilter/nf_flow_table.h b/include/net/netfilter/nf_flow_table.h
 --- a/include/net/netfilter/nf_flow_table.h
 +++ b/include/net/netfilter/nf_flow_table.h
-@@ -190,6 +190,7 @@
+@@ -201,6 +201,7 @@
  
  struct flow_offload_hw_path {
  	struct net_device *dev;
@@ -38,7 +38,7 @@ diff --git a/net/8021q/vlan_dev.c b/net/8021q/vlan_dev.c
 diff --git a/net/ipv6/ip6_tunnel.c b/net/ipv6/ip6_tunnel.c
 --- a/net/ipv6/ip6_tunnel.c
 +++ b/net/ipv6/ip6_tunnel.c
-@@ -56,6 +56,11 @@
+@@ -59,6 +59,11 @@
  #include <net/dst_metadata.h>
  #include <net/inet_dscp.h>
  
@@ -50,7 +50,7 @@ diff --git a/net/ipv6/ip6_tunnel.c b/net/ipv6/ip6_tunnel.c
  MODULE_AUTHOR("Ville Nuorvala");
  MODULE_DESCRIPTION("IPv6 tunneling device");
  MODULE_LICENSE("GPL");
-@@ -1775,6 +1780,21 @@
+@@ -2034,6 +2039,21 @@
  }
  EXPORT_SYMBOL(ip6_tnl_get_iflink);
  
@@ -72,7 +72,7 @@ diff --git a/net/ipv6/ip6_tunnel.c b/net/ipv6/ip6_tunnel.c
  int ip6_tnl_encap_add_ops(const struct ip6_tnl_encap_ops *ops,
  			  unsigned int num)
  {
-@@ -1833,6 +1853,9 @@
+@@ -2092,6 +2112,9 @@
  	.ndo_uninit	= ip6_tnl_dev_uninit,
  	.ndo_start_xmit = ip6_tnl_start_xmit,
  	.ndo_siocdevprivate = ip6_tnl_siocdevprivate,

@@ -1,24 +1,26 @@
 From: "MTWIFI-CI porting layer" <noreply@example.invalid>
-Subject: [PATCH] net: ethernet: mediatek: restore MTK_QDMA_QUEUE_MASK for 6.18
+Subject: [PATCH] net: ethernet: mediatek: add MTK_QDMA_QUEUE_MASK for 6.18
 
-mtk_hnat 用 MTK_QDMA_QUEUE_MASK 从 skb->mark 里取 TX 队列号（见
-hnat_nf_hook.c 的 qid 计算），该宏在 chasey 6.12 树里由 999-zzz-5113
-随 64 队列改造引入，6.18 主线没有。
+mtk_hnat 用 MTK_QDMA_QUEUE_MASK 把 skb->mark / 端口号裁成 TX 队列号
+（见 hnat_nf_hook.c 的 qid 计算与 hnat_api.c 的 hqos 设置）。该宏在
+chasey 的 6.12 树里随队列改造引入，6.18 主线没有。
 
-6.18 的 mtk_eth_soc.h 已经有 MTK_QDMA_NUM_QUEUES 16（队列数由
-soc->num_tx_queues 描述，MT7981/MT7987 都是 16），因此这里只需按同一
-语义补一个掩码：NUM_QUEUES 恒为 2 的幂，掩码即 NUM_QUEUES - 1。
-用 #ifndef 保护，若后续真正启用较大队列数的驱动也能覆盖。
+6.18 主线已把全局队列数宏换成按 SoC 计算的
+struct mtk_soc_data::num_tx_queues，并用 MTK_QTX_PER_PAGE 表示一个
+寄存器页窗口内可见的队列数（页内偏移 = qid % MTK_QTX_PER_PAGE）。
+FOE 表项里的 qid 字段就是页内索引，所以掩码取 MTK_QTX_PER_PAGE - 1：
+这个值在 V1/V2/V3 上都成立，与队列总数无关。
+用 #ifndef 保护，后续驱动若自带同名定义不会冲突。
 ---
 diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.h b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
 --- a/drivers/net/ethernet/mediatek/mtk_eth_soc.h
 +++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.h
-@@ -26,6 +26,9 @@
- #define MTK_DSA_PORT_MASK	GENMASK(2, 0)
+@@ -34,6 +34,9 @@
+ #define MTK_DSA_USER_PORT_MAX	32
  
- #define MTK_QDMA_NUM_QUEUES	16
+ #define MTK_QTX_PER_PAGE	16
 +#ifndef MTK_QDMA_QUEUE_MASK
-+#define MTK_QDMA_QUEUE_MASK	(MTK_QDMA_NUM_QUEUES - 1)
++#define MTK_QDMA_QUEUE_MASK	(MTK_QTX_PER_PAGE - 1)
 +#endif
  #define MTK_QDMA_PAGE_SIZE	2048
  #define MTK_MAX_RX_LENGTH	1536

@@ -6,16 +6,17 @@ ip6_tunnel.c 用 DEV_PATH_DSLITE、sit.c 用 DEV_PATH_6RD、隧道设备
 （GRE / VXLAN / PPPoL2TP / PPTP）用 DEV_PATH_TNL，而 6.18 主线的枚举里
 没有它们，编译会报 undeclared。
 
-6.18 的枚举以 DEV_PATH_MTK_WDMA 结尾，这里在其后追加三者：追加不改变
-已有各项的数值，避免影响 dev_fill_forward_path() 之外任何按数值比较的地方。
+三者追加在枚举末尾：路径类型同时被当作 flow_offload_hw_path.flags 的位号
+（BIT(DEV_PATH_x)）使用，插在中间会改变其后成员的值，让基线已经编译进去的
+各层补丁与这里的位号对不上。追加不改变任何既有成员的数值。
 ---
 diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
 --- a/include/linux/netdevice.h
 +++ b/include/linux/netdevice.h
-@@ -878,6 +878,9 @@
- 	DEV_PATH_PPPOE,
+@@ -881,6 +881,9 @@
  	DEV_PATH_DSA,
  	DEV_PATH_MTK_WDMA,
+ 	DEV_PATH_IEEE80211,
 +	DEV_PATH_DSLITE,
 +	DEV_PATH_6RD,
 +	DEV_PATH_TNL,

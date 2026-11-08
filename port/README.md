@@ -71,18 +71,19 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `999-hnat-36` | 绕过 GE 口的 PPD 载波检查 | 原样命中 |
 | `999-hnat-37` | 内核依赖改为通用 nf nat | 原样命中 |
 | `999-hnat-38` | NETSYS_V2 上启用 wifi hook 的 tx hqos | 原样命中 |
-| `999-hnat-39` | 外接设备报文固定从 PSE 第三口转发 | 重写：6.18 的 `mtk_tx_map()` 已改为经 `txd_info` 汇总写描述符，覆盖点移到 `mtk_tx_set_dma_desc()` 之后 |
-| `999-hnat-40` | 收回报文交还 rx ppd 设备 | 重写：6.18 的 `mtk_poll_rx()` 在 `eth_type_trans()` 之前确定 `netdev`，重定向改在该处替换 `netdev` |
+| `999-hnat-39` | 外接设备报文固定从 PSE 第三口转发 | 重写：6.18 的 `mtk_tx_map_info()` 统一写描述符，把 `skb` 传进去并在 `mtk_tx_set_dma_desc()` 之后覆盖 fport 位段（两个调用点都改） |
+| `999-hnat-40` | 收回报文交还 rx ppd 设备 | 重写：6.18 的 `mtk_poll_rx()` 按 sport 选 netdev，QDMA_TX/WDMA 口在 switch 里置位，netdev 选择处直接取 `g_rx_ppdev` |
+| `999-hnat-41` | HNAT 侧 QDMA 队列数 | 新写：6.18 用 `struct mtk_soc_data::num_tx_queues` 描述队列总数，`MTK_QDMA_NUM_QUEUES` 已移除；选队列、建调试节点、校验 qid 三处改读真实值，未初始化时回退页内队列数 |
 | `999-hnat-24` | 组播表项按代际写 NPU 落点 | 新写：`tport_id`/`tops_entry` 只在 V3 表项布局存在，按 `CONFIG_MEDIATEK_NETSYS_V3` 分支，并以 `hnat_data->mcast` 能力位拒绝 V2 的卸载请求 |
 | `999-hnat-25` | 802.1Q tag proto 判定 | 新写：外接交换机 tagger 的 proto 收进其 Kconfig 条件，未编入 tagger 时判定退化为纯 8021Q |
 
-两条没有落地，原因不是"拿不到补丁"，而是 6.18 里没有可改的对象：
+一条不再按"未落地"处理，一条仍有明确边界：
 
-- **QDMA 64 TXQ**：需要在 QDMA 寄存器窗口里切换 16 队列的分页寄存器
-  （`reg_map->qdma.page`）。6.18 的 `mtk_reg_map` 没有该字段，也没有等价
-  的窗口切换路径，队列表与调度器寄存器仍是单页布局。只把
-  `MTK_QDMA_NUM_QUEUES` 改成 64 会让 16 号以后的队列写到同一组寄存器上，
-  属于"编译通过、行为错误"，因此不做。
+- **QDMA 64 TXQ**：6.18 基线已经把队列数改成按 SoC 描述
+  （`struct mtk_soc_data::num_tx_queues`），并用 `MTK_QTX_PER_PAGE` 分页访问
+  QDMA 寄存器窗口。MT7987 的队列总数是 32，不是 64；所谓"64 队列"是别的
+  SoC 的上限，硬把它写成全局 64 会让超出总页数的队列落到同一组寄存器。
+  正确做法是让驱动读 SoC 描述值，已由 `999-hnat-41` 落地。
 - **V2 关闭 tnl 出口字段**：该改动保护的是 TX 描述符里的 tport/tops_entry/cdrt
   位段，这三个位段由上游 eth 系列的 crypto-tx / tnl-offload 补丁写入；6.18 的
   `mtk_tx_set_dma_desc_v2()` 根本没有这几个字段（`txd7`/`txd8` 恒为 0），
@@ -96,20 +97,25 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `999-hnat-02-*` | 6.18 的 `mtk_eth_soc.h` 没有 `MTK_FE_INT_STATUS2 0x28`（原 hunk 的锚点） | 挂到 `MTK_FE_INT_ENABLE` 之后，并用 `#ifndef` 保护，避免与上游重复定义 |
 | `999-hnat-07-*` | `dsa_user_netdev_ops` 在 6.18 新增 `ndo_hwtstamp_get/set`，原 hunk 以 `};` 紧跟 `ndo_fill_forward_path` 为上下文 | 以 hwtstamp 字段为后置上下文插入 `ndo_flow_offload_check` |
 | `999-hnat-09-*` | 6.18 没有 `ndo_ip6_tnl_flow_offload`，`ip6_tnl_netdev_ops` / `ipip6_netdev_ops` 的成员表也与 6.12 不同；且 6.18 的 `tnl->dev` 指向隧道设备自身 | 回调改挂 `ndo_flow_offload_check`；只置 `DEV_PATH_DSLITE`/`DEV_PATH_6RD` 类型位并记下 `virt_dev`，不再用自指的 `path->dev` |
-| Kconfig（非补丁） | `999-eth-91` 引入 `MEDIATEK_NETSYS_V2/V3`、`NET_MEDIATEK_HNAT` 三个新符号，内核 `.config` 无默认值 → `syncconfig` 以 `(NEW)` 交互提问，非交互环境 Error 1 | `kmod-mediatek_hnat` 的 KCONFIG 按栈补 NETSYS 代际（wifi7→V3 / legacy→V2）；`CONFIG_NET_MEDIATEK_HNAT` 保持不带值（=m，产出 `mtkhnat.ko`） |
+| Kconfig（非补丁） | `999-eth-91` 引入 `MEDIATEK_NETSYS_V2/V3`、`NET_MEDIATEK_HNAT` 三个新符号，内核 `.config` 无默认值 → `syncconfig` 以 `(NEW)` 交互提问，非交互环境 Error 1 | `kmod-mediatek_hnat` 的 KCONFIG 按栈补 NETSYS 代际（wifi7→V3 / legacy→V2）；`CONFIG_NET_MEDIATEK_HNAT` 显式写 `=m`（裸符号不会进覆盖项，且必须是模块才产出 `mtkhnat.ko`） |
 | `999-hnat-03/04/05/06/08/12/14/15` | 无（offset/fuzz 内可直接应用） | 原样搬运 |
-| `999-hnat-11-*` | 6.18 的 `dev_path_type` 枚举尾项是 `DEV_PATH_MTK_WDMA` | 在其后追加 `DEV_PATH_DSLITE` / `DEV_PATH_6RD` / `DEV_PATH_TNL`，不改动已有数值 |
-| `999-hnat-16-*` | 6.18 已有 `MTK_QDMA_NUM_QUEUES`，但没有 `MTK_QDMA_QUEUE_MASK`；`MTK_FE_RESET_NAT_DONE` 移出到 `999-hnat-23` 的公共头文件 | 只保留缺的那个宏，并加 `#ifndef` |
+| `999-hnat-11-*` | 基线 `pending-6.18` 已把 `DEV_PATH_IEEE80211` 追加在 `DEV_PATH_MTK_WDMA` 之后 | 三个新成员追加在枚举末尾，既有成员取值不变（路径类型同时是 `flags` 的位号） |
+| `999-hnat-16-*` | 6.18 已去掉全局 `MTK_QDMA_NUM_QUEUES`，改为 `MTK_QTX_PER_PAGE` 分页 | 只补 `MTK_QDMA_QUEUE_MASK`，取值按页内队列数（`MTK_QTX_PER_PAGE - 1`），`#ifndef` 保护 |
 | `999-hnat-17-*` | 6.18 没有 `drivers/net/ethernet/mediatek/mtk_eth_dbg.h` | 只删 `hnat_debugfs.c` 里对该头文件的引用；`hnat_nf_hook.c` 需要的 `mtk_eth_reset.h` 由 `999-hnat-23` 提供 |
 | `999-hnat-21-*` | `ppp_channel_ops` 在 6.18 没有 `flow_offload_check`（由 `999-hnat-06` 引入）；`session->tunnel` 可能为 NULL | 回调按真实成员表落位；取 tunnel 前先 `READ_ONCE` 快照并判空 |
 | `999-hnat-23-*` | 6.18 的 `mtk_pending_work()` 在 `mtk_hw_init(eth, true)` 之后立即重开设备 | 在两者之间广播 `MTK_FE_RESET_NAT_DONE`，事件号放进新建的 `mtk_eth_reset.h` 供两侧共用 |
 | `999-hnat-24/25/39/40` | 见上节表格 | 按 6.18 结构新写 |
 
-验证方式：在 linux-6.18.55 树上（先叠 `files-6.18` 源码与 `ra_nat.h`，再按编号顺序
-`patch -p1 --fuzz=0`）40 条全部命中；随后用 aarch64 交叉工具链对 17 个关键对象
-逐个 `make <obj>.o`，全部通过（`mtk_eth_soc.o`、6 个 `mtk_hnat/*.o`、`skbuff.o`、
-`vlan_dev.o`、`sit.o`、`ip6_tunnel.o`、`ip_gre.o`、`vxlan_core.o`、`l2tp_core.o`、
-`l2tp_ppp.o`、`pptp.o`、`ppp_generic.o`）。CI 侧仍以 `kernel-prepare.log` 为准。
+验证方式：必须按 quilt 的真实顺序重建目录——先铺 `files/`、`files-6.18`
+（`Kernel/Patch/Default` 是"先覆盖文件，再打补丁"），再依次应用
+`generic/backport-6.18`、`generic/pending-6.18`、`generic/hack-6.18`、
+`mediatek/patches-6.18`，最后按编号 `patch -p1 --fuzz=0` 我方 41 条，全部命中。
+只在"纯 6.18.55"上验证会漏掉基线补丁对这些文件的改写（例如 `netdevice.h`
+的 `DEV_PATH` 枚举、`mtk_eth_soc.c` 的 TX 写描述符路径），补丁在实树里必然失败。
+随后用 aarch64 交叉工具链对 17 个关键对象逐个 `make <obj>.o`，全部通过
+（`mtk_eth_soc.o`、6 个 `mtk_hnat/*.o`、`skbuff.o`、`vlan_dev.o`、`sit.o`、
+`ip6_tunnel.o`、`ip_gre.o`、`vxlan_core.o`、`l2tp_core.o`、`l2tp_ppp.o`、
+`pptp.o`、`ppp_generic.o`）。CI 侧仍以 `kernel-prepare.log` 为准。
 
 ## 编译期约束：NETSYS 代际符号必须是 bool
 

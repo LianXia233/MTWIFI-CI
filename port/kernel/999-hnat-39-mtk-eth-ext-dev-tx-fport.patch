@@ -15,21 +15,51 @@ HNAT 给"从外接设备进来、要转出去"的报文在 skb 控制块里打�
 diff --git a/drivers/net/ethernet/mediatek/mtk_eth_soc.c b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 --- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
 +++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
-@@ -1632,6 +1632,17 @@
+@@ -1674,7 +1674,7 @@
+ static int
+ mtk_tx_map_info(struct mtk_eth *eth, struct mtk_tx_ring *ring,
+ 		struct net_device *dev, struct mtk_tx_map_state *state,
+-		struct mtk_tx_dma_desc_info *txd_info)
++		struct mtk_tx_dma_desc_info *txd_info, struct sk_buff *skb)
+ {
+ 	const struct mtk_soc_data *soc = eth->soc;
+ 	struct mtk_tx_buf *tx_buf = state->tx_buf;
+@@ -1692,6 +1692,18 @@
+ 	}
  
- 	mtk_tx_set_dma_desc(dev, itxd, &txd_info);
- 
+ 	mtk_tx_set_dma_desc(dev, txd, txd_info);
++
 +#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
 +	/*
 +	 * 带 HNAT magic 标记的报文来自外接设备侧，出口固定为 PSE 第三口，
-+	 * 覆盖描述符里按 mac id 推出的默认转发口。
++	 * 覆盖描述符里按 mac id 推出的默认转发口。v1 描述符没有 fport 位段。
 +	 */
-+	if (HNAT_SKB_CB2(skb)->magic == HNAT_MAGIC_TAG) {
-+		itxd->txd4 &= ~(TX_DMA_FPORT_MASK_V2 << TX_DMA_FPORT_SHIFT_V2);
-+		itxd->txd4 |= 0x3 << TX_DMA_FPORT_SHIFT_V2;
++	if (mtk_is_netsys_v2_or_greater(eth) &&
++	    HNAT_SKB_CB2(skb)->magic == HNAT_MAGIC_TAG) {
++		txd->txd4 &= ~(TX_DMA_FPORT_MASK_V2 << TX_DMA_FPORT_SHIFT_V2);
++		txd->txd4 |= 0x3 << TX_DMA_FPORT_SHIFT_V2;
 +	}
 +#endif
-+
- 	itx_buf->flags |= MTK_TX_FLAGS_SINGLE0;
- 	itx_buf->mac_id = mac->id;
- 	setup_tx_buf(eth, itx_buf, itxd_pdma, txd_info.addr, txd_info.size,
+ 	tx_buf = state->tx_buf;
+ 	tx_buf->data = (void *)MTK_DMA_DUMMY_DESC;
+ 	tx_buf->mac_id = mac->id;
+@@ -1841,7 +1853,8 @@
+ 		offset += txd_info.size;
+ 		txd_info.last = !frag_size && !skb_shinfo(cur_skb)->nr_frags &&
+ 				(gso_fraglist || !next_skb);
+-		if (mtk_tx_map_info(eth, ring, dev, &state, &txd_info) < 0)
++		if (mtk_tx_map_info(eth, ring, dev, &state, &txd_info,
++				    skb) < 0)
+ 			goto err_dma;
+ 	}
+ 
+@@ -1864,7 +1877,8 @@
+ 			offset += txd_info.size;
+ 			txd_info.last = i == skb_shinfo(cur_skb)->nr_frags - 1 &&
+ 					!frag_size && (gso_fraglist || !next_skb);
+-			if (mtk_tx_map_info(eth, ring, dev, &state, &txd_info) < 0)
++			if (mtk_tx_map_info(eth, ring, dev, &state, &txd_info,
++					    skb) < 0)
+ 				goto err_dma;
+ 		}
+ 	}
