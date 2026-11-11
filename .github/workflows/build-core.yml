@@ -76,7 +76,7 @@ jobs:
       MTK_PDN_REF: mt798x-mt799x-6.6-mtwifi
     steps:
       - name: 检出本仓库
-        uses: actions/checkout@main
+        uses: actions/checkout@v7
 
       - name: 编译宿主准备
         env:
@@ -160,7 +160,7 @@ jobs:
 
       - name: 恢复编译缓存
         if: ${{ !inputs.test-mode }}
-        uses: actions/cache/restore@main
+        uses: actions/cache/restore@v6
         id: cache-restore
         with:
           key: ${{ steps.meta.outputs.cache-key }}
@@ -214,7 +214,7 @@ jobs:
 
       - name: 保存编译缓存
         if: ${{ !inputs.test-mode && success() && steps.cache-restore.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@main
+        uses: actions/cache/save@v6
         with:
           key: ${{ steps.meta.outputs.cache-key }}
           path: |
@@ -239,7 +239,7 @@ jobs:
 
       - name: 发布 Release
         if: ${{ !inputs.test-mode }}
-        uses: softprops/action-gh-release@master
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.config }}-${{ steps.meta.outputs.date }}
           files: wrt/upload/*.*
