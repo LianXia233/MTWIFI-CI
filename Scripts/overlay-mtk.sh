@@ -201,6 +201,18 @@ if [ -d "$MTK_DRV" ]; then
 		perl -0777 -pi -e 's/int mt_init_dummy_netdev\(struct net_device \*dev\)\s*\{\s*return init_dummy_netdev\(dev\);\s*\}/int mt_init_dummy_netdev(struct net_device *dev)\n{\n\tmemset(dev, 0, sizeof(*dev));\n\tdev->reg_state = NETREG_DUMMY;\n\tset_bit(__LINK_STATE_PRESENT, &dev->state);\n\tset_bit(__LINK_STATE_START, &dev->state);\n\treturn 0;\n}/s' "$f"
 	done
 	note "init_dummy_netdev 就地初始化: $DMY 文件"
+
+	# 归一化未命中就立即失败，避免把问题拖到 2h 后的编译阶段。
+	for pat in 'strlcpy(' 'rtc_time_to_tm(' 'netif_rx_ni(' 'return init_dummy_netdev(dev);'; do
+		n=$(grep -rlF "$pat" "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+		[ "$n" -eq 0 ] || die "API 归一化未覆盖: $pat（$n 文件）"
+	done
+	TRACE_LEFT=$(find "$MTK_DRV" -path '*/include/os/trace.h' -type f \
+		-exec grep -l 'do_gettimeofday(&time);' {} + 2>/dev/null | wc -l)
+	[ "$TRACE_LEFT" -eq 0 ] || die "trace.h 时间戳归一化未覆盖（$TRACE_LEFT 文件）"
+	WERR_LEFT=$(grep -rlE -- '(^|[[:space:]])-Werror([[:space:]]|$)' "$MTK_DRV" \
+		--include='Makefile' --include='*.mk' 2>/dev/null | wc -l)
+	[ "$WERR_LEFT" -eq 0 ] || die "-Werror 归一化未覆盖（$WERR_LEFT 文件）"
 else
 	note "WARN: 无 package/mtk/drivers，跳过 API 归一化"
 fi
