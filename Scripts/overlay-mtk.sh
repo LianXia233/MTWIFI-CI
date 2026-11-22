@@ -176,6 +176,22 @@ if [ -d "$MTK_DRV" ]; then
 		note "KCFLAGS += -DKTHREAD_SUPPORT（kthread_run 分支）: ${mk#"$WRT_DIR"/}"
 	done
 
+	# 6.12 起内核把 -Wmissing-prototypes / -Wmissing-declarations 放进默认
+	# KBUILD_CFLAGS，pdn 的 6.6 闭源树从未面对这两个检查；这些包又用 -Werror
+	# 把警告变错误。闭源源码不可能逐条补原型，统一把裸 -Werror 降为
+	# -Wno-error（-Werror=implicit-function-declaration 等内核强错误仍保留）。
+	WERR_FILES=$(grep -rlE -- '(^|[[:space:]])-Werror([[:space:]]|$)' "$MTK_DRV" \
+		--include='Makefile' --include='*.mk' 2>/dev/null || true)
+	if [ -n "$WERR_FILES" ]; then
+		WERR_COUNT=$(printf '%s\n' "$WERR_FILES" | wc -l)
+		printf '%s\n' "$WERR_FILES" | while IFS= read -r f; do
+			sed -i -E 's/(^|[[:space:]])-Werror([[:space:]]|$)/\1-Wno-error\2/g' "$f"
+		done
+		note "-Werror → -Wno-error（6.6 闭源树）：$WERR_COUNT 文件"
+	else
+		note "-Werror 归一化：无匹配文件"
+	fi
+
 	# init_dummy_netdev() 在 6.18 变成内核内部函数，公开 API 只剩分配式的
 	# alloc_netdev_dummy()。驱动把 struct net_device 内嵌在私有结构里，只能按
 	# 6.12 的语义就地初始化（清零 + NETREG_DUMMY + PRESENT/START）。
