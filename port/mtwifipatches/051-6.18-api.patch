@@ -1,0 +1,87 @@
+SPDX-License-Identifier: MIT
+# 6.18 移植（legacy mt_wifi 767x，排在 050 之后）
+#
+# 1. hif_pci.c：6.18 的 struct page_frag_cache 只保留 encoded_page，
+#    rx_ring->rx_page.va / pagecnt_bias 手工 drain 编译失败；>=6.18 改用
+#    page_frag_cache_drain(&rx_ring->rx_page)。
+# 2. mt_wifi_ap/Makefile：CONFIG_KTHREAD 在本构建中不会置 y，源码会走
+#    kernel_thread() 分支（该符号在 6.18 不再导出，且 5.10 起签名变化），
+#    同时 __RtmpOSTaskWaitCond 还有 #error "Not yet implemented"。强制启用
+#    厂商的 KTHREAD_SUPPORT（kthread_run）分支。
+# 3. netif_rx_ni() 在 6.9 移除，启用 SNIFFER_RADIOTAP 时会编译；统一换 netif_rx()。
+--- a/mt_wifi_ap/Makefile
++++ b/mt_wifi_ap/Makefile
+@@ -1269,6 +1269,9 @@
+ ifeq ($(CONFIG_KTHREAD),y)
+     EXTRA_CFLAGS += -DKTHREAD_SUPPORT
+ endif
++# 6.18: kernel_thread() 已不再导出（且 5.10 起为 4 参数），厂商的
++# kthread_run 分支必须启用；CONFIG_KTHREAD 在本构建里不会置 y。
++EXTRA_CFLAGS += -DKTHREAD_SUPPORT
+ 
+ ifeq ($(CONFIG_LINUX_NET_TXQ_SUPPORT),y)
+ EXTRA_CFLAGS += -DLINUX_NET_TXQ_SUPPORT
+--- a/mt_wifi/embedded/common/hif_pci.c
++++ b/mt_wifi/embedded/common/hif_pci.c
+@@ -16,6 +16,9 @@
+ */
+ 
+ #include "rt_config.h"
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#include <linux/page_frag_cache.h>
++#endif
+ #include "common/link_list.h"
+ #include "multi_hif.h"
+ #ifdef RX_RPS_SUPPORT
+@@ -4952,6 +4955,12 @@
+ 
+ 		NdisZeroMemory(rx_ring->Cell, RxRingSize * sizeof(RTMP_DMACB));
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++		if (rx_ring->buf_type == DYNAMIC_PAGE_ALLOC) {
++			page_frag_cache_drain(&rx_ring->rx_page);
++			NdisZeroMemory(&rx_ring->rx_page, sizeof(rx_ring->rx_page));
++		}
++#else
+ #if LINUX_VERSION_CODE > KERNEL_VERSION(4, 3, 0)
+ 		if (rx_ring->buf_type == DYNAMIC_PAGE_ALLOC) {
+ 
+@@ -4964,6 +4973,7 @@
+ 			}
+ 		}
+ #endif
++#endif
+ 
+ 	}
+ 
+--- a/mt_wifi/os/linux/rt_profile.c
++++ b/mt_wifi/os/linux/rt_profile.c
+@@ -1610,7 +1610,7 @@
+ 	if (pOSPkt->dev == NULL)
+ 		RELEASE_NDIS_PACKET(pAd, pPacket, NDIS_STATUS_FAILURE);
+ 	else
+-		netif_rx_ni(pOSPkt);
++		netif_rx(pOSPkt);
+ 
+ }
+ #endif
+--- a/mt_wifi/embedded/common/sniffer_radiotap.c
++++ b/mt_wifi/embedded/common/sniffer_radiotap.c
+@@ -575,7 +575,7 @@
+ 	memcpy((pOSPkt->data + mtk_rt_hdr->rt_hdr.it_len - MT7615_RMAC_LENGTH), rmac_info_buffer, MT7615_RMAC_LENGTH);
+ #endif
+ #endif
+-	netif_rx_ni(pOSPkt);
++	netif_rx(pOSPkt);
+ #ifdef SNIFFER_MT7615_RMAC_INC
+ 	os_free_mem(rmac_info_buffer);
+ #endif
+@@ -1127,7 +1127,7 @@
+ 	pOSPkt->pkt_type = PACKET_OTHERHOST;
+ 	pOSPkt->protocol = __constant_htons(ETH_P_80211_RAW);
+ 	pOSPkt->ip_summed = CHECKSUM_NONE;
+-	netif_rx_ni(pOSPkt);
++	netif_rx(pOSPkt);
+ 	return;
+ err_free_sk_buff:
+ 	RELEASE_NDIS_PACKET(NULL, pRxPacket, NDIS_STATUS_FAILURE);
