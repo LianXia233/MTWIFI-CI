@@ -1,0 +1,68 @@
+SPDX-License-Identifier: MIT
+# port-stack: wifi7
+# 6.18 移植：wlan_hwifi 的 page_frag_cache 字段变更
+#
+# mtk_pci_dma.c 的 pci_rx_queue_page_drain() 直接读 rq->rx_page.va 并手工
+# __page_frag_cache_drain(page, pagecnt_bias)。6.18 的 struct page_frag_cache
+# 只保留 encoded_page（include/linux/page_frag_cache.h），>=6.18 改用导出的
+# page_frag_cache_drain(&rq->rx_page)。
+--- a/package/mtk/drivers/mt_wifi7/src/wlan_hwifi/bus/mtk_pci_dma.c
++++ b/package/mtk/drivers/mt_wifi7/src/wlan_hwifi/bus/mtk_pci_dma.c
+@@ -30,6 +30,9 @@
+ 
+ #include <linux/interrupt.h>
+ #include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#include <linux/page_frag_cache.h>
++#endif
+ #include "mac_ops.h"
+ #include "bus.h"
+ #include "mtk_pci_dma.h"
+@@ -843,6 +846,9 @@
+ static void
+ pci_rx_queue_page_drain(struct pci_rx_queue *rq)
+ {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	page_frag_cache_drain(&rq->rx_page);
++#else
+ 	if (rq->rx_page.va) {
+ 		struct page *page;
+ 
+@@ -854,6 +860,7 @@
+ 				rq->rx_page.pagecnt_bias);
+ #endif
+ 	}
++#endif
+ 
+ 	memset(&rq->rx_page, 0x00, sizeof(rq->rx_page));
+ }
+--- a/package/mtk/drivers/mt_hwifi/src/wlan_hwifi/bus/mtk_pci_dma.c
++++ b/package/mtk/drivers/mt_hwifi/src/wlan_hwifi/bus/mtk_pci_dma.c
+@@ -30,6 +30,9 @@
+ 
+ #include <linux/interrupt.h>
+ #include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#include <linux/page_frag_cache.h>
++#endif
+ #include "mac_ops.h"
+ #include "bus.h"
+ #include "mtk_pci_dma.h"
+@@ -843,6 +846,9 @@
+ static void
+ pci_rx_queue_page_drain(struct pci_rx_queue *rq)
+ {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	page_frag_cache_drain(&rq->rx_page);
++#else
+ 	if (rq->rx_page.va) {
+ 		struct page *page;
+ 
+@@ -854,6 +860,7 @@
+ 				rq->rx_page.pagecnt_bias);
+ #endif
+ 	}
++#endif
+ 
+ 	memset(&rq->rx_page, 0x00, sizeof(rq->rx_page));
+ }

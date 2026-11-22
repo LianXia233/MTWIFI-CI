@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: MIT
+# 6.18 移植：legacy warp（warp_bm_v2.c / mcu/warp_wo.c）的 page_frag_cache 字段变更
+#
+# 6.18 把 struct page_frag_cache 改成 encoded_page（include/linux/page_frag_cache.h），
+# 源码里的 .va / pagecnt_bias 手工 drain 全部失效。>=6.18 统一改用
+# page_frag_cache_drain(&cache)；旧路径保留在 #else，辅助函数随之只在旧内核编译。
+--- a/warp_bm_v2.c
++++ b/warp_bm_v2.c
+@@ -5,6 +5,9 @@
+ #include <linux/version.h>
+ #include <linux/pci.h>
+ #include <linux/vmalloc.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#include <linux/page_frag_cache.h>
++#endif
+ 
+ #define DYBM_RX_EXT_POLLING_CNT	(0)//(50) /*50 times of polling approximately cost 5us */
+ #define TX_BM_HTH_DELAY_INT_INTERVAL	2000	/* 2 seconds */
+@@ -230,6 +233,7 @@
+ 	return -1;
+ }
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+ static void tx_page_frag_cache_drain(struct page *page,
+ 								unsigned int count)
+ {
+@@ -240,6 +244,7 @@
+ 		__free_pages(page, compound_order(page));
+ #endif
+ }
++#endif
+ 
+ 
+ /*
+@@ -250,7 +255,9 @@
+ {
+ 	struct list_head *cur = NULL, *next = NULL;
+ 	struct platform_device *pdev = wed->pdev;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+ 	struct page *page;
++#endif
+ 	struct sw_conf_t *sw_conf = wed->sw_conf;
+ 
+ 	if (!res->des_buf.alloc_va)
+@@ -283,11 +290,16 @@
+ 	}
+ #endif	/* WED_DYNAMIC_TXBM_SUPPORT */
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	page_frag_cache_drain(&res->tx_page);
++	memset(&res->tx_page, 0, sizeof(res->tx_page));
++#else
+ 	if (res->tx_page.va) {
+ 		page = virt_to_page(res->tx_page.va);
+ 		tx_page_frag_cache_drain(page, res->tx_page.pagecnt_bias);
+ 		memset(&res->tx_page, 0, sizeof(res->tx_page));
+ 	}
++#endif
+ 
+ 	warp_dma_buf_free(pdev, &res->des_buf);
+ 	warp_dma_buf_free(pdev, &res->fbuf);
+@@ -942,6 +954,7 @@
+ }
+ #endif
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+ static inline void rx_bm_page_frag_cache_drain(struct page *page,
+ 								unsigned int count)
+ {
+@@ -951,6 +964,7 @@
+ 		__rx_bm_page_frag_drain(page, compound_order(page), count);
+ #endif
+ }
++#endif
+ 
+ static void
+ wed_rx_bm_ring_exit(
+@@ -973,12 +987,17 @@
+ 		wed_rx_bm_dma_cb_exit(wed, &ring->cell[i]);
+ 
+ 	for (i = 0; i < 2; i++) {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++		page_frag_cache_drain(&res->rx_page[i]);
++		memset(&res->rx_page[i], 0, sizeof(res->rx_page[i]));
++#else
+ 		if (res->rx_page[i].va) {
+ 			struct page *page;
+ 			page = virt_to_page(res->rx_page[i].va);
+ 			rx_bm_page_frag_cache_drain(page, res->rx_page[i].pagecnt_bias);
+ 			memset(&res->rx_page[i], 0, sizeof(res->rx_page[i]));
+ 		}
++#endif
+ 	}
+ 
+ 	vfree(ring->cell);
+@@ -1728,12 +1747,17 @@
+ 			}
+ 
+ 			for (i = 0; i < 2; i++) {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++				page_frag_cache_drain(&res->rx_page[i]);
++				memset(&res->rx_page[i], 0, sizeof(res->rx_page[i]));
++#else
+ 				if (res->rx_page[i].va) {
+ 					struct page *page;
+ 					page = virt_to_page(res->rx_page[i].va);
+ 					rx_bm_page_frag_cache_drain(page, res->rx_page[i].pagecnt_bias);
+ 					memset(&res->rx_page[i], 0, sizeof(res->rx_page[i]));
+ 				}
++#endif
+ 			}
+ 
+ 			/*free wed rx ring*/
+--- a/mcu/warp_wo.c
++++ b/mcu/warp_wo.c
+@@ -20,6 +20,9 @@
+ #include "warp_meminfo_list.h"
+ 
+ #include <linux/version.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#include <linux/page_frag_cache.h>
++#endif
+ #if defined(CONFIG_MTK_AEE_FEATURE)
+ #include <mt-plat/aee.h>
+ #endif
+@@ -311,11 +314,17 @@
+ 
+ static void bus_ring_exit(struct woif_bus *bus)
+ {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+ 	struct page *page;
++#endif
+ 
+ 	tx_ring_exit(bus, &bus->tx_ring);
+ 	rx_ring_exit(bus, &bus->rx_ring);
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	page_frag_cache_drain(&bus->woif_tx_page);
++	memset(&bus->woif_tx_page, 0, sizeof(bus->woif_tx_page));
++#else
+ 	if (bus->woif_tx_page.va) {
+ 		page = virt_to_page(bus->woif_tx_page.va);
+ #if (KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE)
+@@ -326,6 +335,11 @@
+ #endif
+ 		memset(&bus->woif_tx_page, 0, sizeof(bus->woif_tx_page));
+ 	}
++#endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	page_frag_cache_drain(&bus->woif_rx_page);
++	memset(&bus->woif_rx_page, 0, sizeof(bus->woif_rx_page));
++#else
+ 	if (bus->woif_rx_page.va) {
+ 		page = virt_to_page(bus->woif_rx_page.va);
+ #if (KERNEL_VERSION(4, 10, 0) <= LINUX_VERSION_CODE)
+@@ -336,6 +350,7 @@
+ #endif
+ 		memset(&bus->woif_rx_page, 0, sizeof(bus->woif_rx_page));
+ 	}
++#endif
+ 
+ }
+ 

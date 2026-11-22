@@ -130,6 +130,10 @@ else
 	note "驱动层 = pdn 全套（mt_wifi7 + mt_wifi_cmn + mt_hwifi + warp + wifi-profile）"
 fi
 
+# 驱动层根目录在后续所有步骤共用；必须在这里定义（脚本 set -u，
+# 放在 [2b] 段里会导致前面的 build_dep 引用未定义变量直接退出）。
+MTK_DRV="$WRT_DIR/package/mtk/drivers"
+
 while IFS= read -r -d '' app; do
 	name=$(basename "$app")
 	if [ -e "$WRT_DIR/package/mtk/applications/$name" ]; then
@@ -187,6 +191,16 @@ if [ -d "$MW_PATCHES" ]; then
 	note "mt_wifi：装载 patches-7673/050-6.18-api.patch"
 fi
 
+# legacy warp 同样是 tarball 源码（warp_20250408），且 V2/V3 会编译
+# warp_bm_v2.c 与 mcu/warp_wo.c；6.18 的 page_frag_cache 去掉 .va/pagecnt_bias
+# 字段后必然编译失败。补丁编号 100，排在 chasey 的 001..099 之后应用。
+WARP_PATCHES="$MTK_DRV/warp/patches"
+if [ "$MTK_STACK" = legacy ] && [ -d "$WARP_PATCHES" ]; then
+	cp -f "$GITHUB_WORKSPACE/port/warp-patches/100-page-frag-6.18.patch" "$WARP_PATCHES/" \
+		|| die "warp 100 补丁装载失败"
+	note "warp：装载 patches/100-page-frag-6.18.patch"
+fi
+
 # apk 的版本校验比 opkg 严格：6.18.55.TEST-r1 / 空版本会被 apk mkpkg 拒绝
 # （ERROR: info field 'version' has invalid value）。pdn 的几个 kmod 包用
 # PKG_VERSION:=TEST 或留空，KernelPackage 会拼出非法版本；统一改为 1.0。
@@ -211,7 +225,6 @@ note "pdn kmod PKG_VERSION → 1.0（apk 版本校验）"
 # chasey 的 legacy 树已是 6.12 基线，这些符号本就不存在，替换为无操作。
 # ---------------------------------------------------------------------------
 log "[2b/6] 6.18 内核 API 机械归一化"
-MTK_DRV="$WRT_DIR/package/mtk/drivers"
 if [ -d "$MTK_DRV" ]; then
 	SLC=$(grep -rl 'strlcpy(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	NLA=$(grep -rl 'nla_strlcpy(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
