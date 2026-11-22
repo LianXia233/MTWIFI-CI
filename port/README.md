@@ -18,6 +18,7 @@ immortalwrt checkout（本仓库 overlay 时可见）
 |---|---|---|---|
 | `port/kernel/*.patch` | 解压后的内核树（drivers/、arch/ 等） | **拷贝**进 `patches-6.18/`，**优先于上游同名补丁** | 构建期 quilt 打不上 → `内核准备` 步骤失败，日志有 `.rej` |
 | `port/repo/*.patch` | checkout 侧文件（package/mtk、target DTS） | **当场应用**（严格模式），支持 `# port-stack: wifi7\|legacy` 声明 | overlay 步骤立即失败并指名补丁；栈不符的补丁跳过 |
+| `port/wifi-utility/*.c` | `files-6.18/drivers/net/wireless/wifi_utility/` | 由 overlay **拷贝并追加进该目录的 Makefile** | 在模块 modpost 阶段以 undefined symbol 暴露 |
 
 栈声明用于两类平台的差异补丁：`H5000M*` 走 `wifi7`（pdn 的 `mt_wifi7`），
 `AP3000M*` 走 `legacy`（chasey 的 `mt_wifi`，整个 `drivers/` 被替换）。
@@ -107,6 +108,7 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `999-hnat-24/25/39/40` | 见上节表格 | 按 6.18 结构新写 |
 | `port/repo/005-fibocom-qmi-wwan-6.18-compat.patch` | `qmi_wwan_f.c`（`fibocom_QMI_WWAN`）：6.13 移除 `hrtimer_init()`、6.8 移除 `strlcpy()`，编译报 implicit declaration | `hrtimer_setup()` / `strscpy()` 双分支，`LINUX_VERSION_CODE` 守卫保留旧内核兼容 |
 | `port/repo/006-quectel-qmi-wwan-6.18-compat.patch` | `qmi_wwan_q.c`（`quectel_QMI_WWAN`）：同上两处 API | 同上 |
+| `port/wifi-utility/mt_wifi_eeprom.c` | legacy 栈 `conninfra` 与 `mt_wifi` 767x 调用 `mt_eeprom_read_wifi()`/`mt_eeprom_write_wifi()`（chasey 999-zzz-5203 引入）；6.18 只搬了 pdn 的 `wifi_utility`（仅 `mt_mtd_*`），模块 modpost 报 undefined | overlay 在 `files-6.18/.../wifi_utility/` 补最小实现（`Factory` → `factory` 回退）并挂进 Makefile；OF/nvmem 后端暂不移植（AP3000M 的 factory 分区由首启脚本写入） |
 
 验证方式：必须按 quilt 的真实顺序重建目录——先铺 `files/`、`files-6.18`
 （`Kernel/Patch/Default` 是"先覆盖文件，再打补丁"），再依次应用

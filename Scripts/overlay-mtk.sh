@@ -157,6 +157,22 @@ mkdir -p "$(dirname "$RA_NAT_DST")"
 cp -f "$RA_NAT_SRC" "$RA_NAT_DST" || die "ra_nat.h 复制失败"
 note "ra_nat.h → files-$KVER/include/net/（$(wc -c < "$RA_NAT_DST") 字节）"
 
+# pdn 的 wifi_utility 只导出 mt_mtd_read_nm_wifi()/mt_mtd_write_nm_wifi()；
+# legacy 栈（conninfra、mt_wifi 767x）调用的是 chasey 999-zzz-5203 补丁引入的
+# mt_eeprom_read_wifi()/mt_eeprom_write_wifi()。只搬 pdn 版本会缺这两个符号，
+# 模块 modpost 阶段报 undefined。补回最小实现（Factory/factory 回退），
+# 并挂进 wifi_utility 的 Makefile。
+EEPROM_C="$GITHUB_WORKSPACE/port/wifi-utility/mt_wifi_eeprom.c"
+WU_DIR="$WRT_DIR/target/linux/mediatek/files-$KVER/drivers/net/wireless/wifi_utility"
+if [ -f "$EEPROM_C" ] && [ -d "$WU_DIR" ]; then
+	cp -f "$EEPROM_C" "$WU_DIR/mt_wifi_eeprom.c" || die "mt_wifi_eeprom.c 复制失败"
+	grep -q 'mt_wifi_eeprom\.o' "$WU_DIR/Makefile" \
+		|| echo 'obj-y += mt_wifi_eeprom.o' >> "$WU_DIR/Makefile"
+	note "mt_eeprom_* 后备 → files-$KVER/.../wifi_utility（conninfra / mt_wifi 链接）"
+else
+	note "WARN: 跳过 mt_eeprom_* 后备（缺 $EEPROM_C 或 wifi_utility 目录）"
+fi
+
 # ---------------------------------------------------------------------------
 # [4] kmod-mediatek_hnat 包定义挂入 netdevices.mk
 #     eth-91 的 Kconfig 补丁会引入 MEDIATEK_NETSYS_V2/V3 与 NET_MEDIATEK_HNAT
