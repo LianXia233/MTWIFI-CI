@@ -153,6 +153,31 @@ if [ -d "$SRC_DIR/chasey/package/mtk/applications/datconf" ]; then
 	note "datconf：使用 chasey 版本（PKG_SOURCE_URL/HASH + ucode-mod-datconf）"
 fi
 
+# 跨源码包的符号依赖：kmod 的 DEPENDS 只保证运行时顺序，编译期 symvers
+# 需要 PKG_BUILD_DEPENDS 才会生成正确的 build 依赖边。parallel 构建里
+# 否则会出现“先编调用方、后编符号提供者” → modpost undefined。
+build_dep() {
+	local mk="$1" deps="$2" cur d
+	[ -f "$mk" ] || return 0
+	if grep -q '^PKG_BUILD_DEPENDS' "$mk"; then
+		cur=$(sed -n 's/^PKG_BUILD_DEPENDS:=//p' "$mk" | head -n1)
+		for d in $deps; do
+			case " $cur " in *" $d "*) ;; *) cur="$cur $d" ;; esac
+		done
+		sed -i "s/^PKG_BUILD_DEPENDS:=.*$/PKG_BUILD_DEPENDS:=$cur/" "$mk"
+	else
+		awk -v deps="$deps" 'BEGIN{done=0}
+			/^include \$\(INCLUDE_DIR\)\/package\.mk[[:space:]]*$/ {
+				if (!done) { print "PKG_BUILD_DEPENDS:=" deps; done=1 }
+			}
+			{ print }' "$mk" > "$mk.tmp" && mv "$mk.tmp" "$mk"
+	fi
+	note "PKG_BUILD_DEPENDS += $deps: ${mk#"$WRT_DIR"/}"
+}
+build_dep "$MTK_DRV/mt_wifi/Makefile"  "warp conninfra"
+build_dep "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_cmn"
+build_dep "$MTK_DRV/mt_hwifi/Makefile" "mt_wifi7 mt_wifi_cmn warp"
+
 # ---------------------------------------------------------------------------
 # [2b] 6.18 内核 API 机械归一化（只做语义等价替换，不动控制流）
 #
