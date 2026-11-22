@@ -253,7 +253,7 @@ jobs:
       # 下一轮 restore-keys 会命中 <prefix>-diag，省掉 ~1.5h 的工具链重建。
       # 固定 key，避免每次失败都产生一份新缓存；已存在时保存报错由 continue-on-error 吞掉。
       - name: 保存诊断缓存（失败时复用宿主/工具链）
-        if: ${{ !inputs.test-mode && steps.build.outcome == 'failure' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ !inputs.test-mode && failure() && steps.build.outcome == 'failure' && steps.cache-restore.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
