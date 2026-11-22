@@ -142,15 +142,17 @@ log "[2b/6] 6.18 内核 API 机械归一化"
 MTK_DRV="$WRT_DIR/package/mtk/drivers"
 if [ -d "$MTK_DRV" ]; then
 	SLC=$(grep -rl 'strlcpy(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	NLA=$(grep -rl 'nla_strlcpy(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	RTM=$(grep -rl 'rtc_time_to_tm(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	NRN=$(grep -rl 'netif_rx_ni(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
-	grep -rl 'strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(' "$MTK_DRV" \
+	grep -rl 'strlcpy(\|nla_strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null |
 		xargs -r sed -i \
 			-e 's/\bstrlcpy(/strscpy(/g' \
+			-e 's/\bnla_strlcpy(/nla_strscpy(/g' \
 			-e 's/\brtc_time_to_tm(/rtc_time64_to_tm(/g' \
 			-e 's/\bnetif_rx_ni(/netif_rx(/g'
-	note "strlcpy→strscpy: $SLC 文件 | rtc_time_to_tm→rtc_time64_to_tm: $RTM 文件 | netif_rx_ni→netif_rx: $NRN 文件"
+	note "strlcpy→strscpy: $SLC 文件 | nla_strlcpy→nla_strscpy: $NLA 文件 | rtc_time_to_tm→rtc_time64_to_tm: $RTM 文件 | netif_rx_ni→netif_rx: $NRN 文件"
 
 	find "$MTK_DRV" -path '*/include/os/trace.h' -type f -print0 |
 	while IFS= read -r -d '' trace_h; do
@@ -203,7 +205,10 @@ if [ -d "$MTK_DRV" ]; then
 	note "init_dummy_netdev 就地初始化: $DMY 文件"
 
 	# 归一化未命中就立即失败，避免把问题拖到 2h 后的编译阶段。
-	for pat in 'strlcpy(' 'rtc_time_to_tm(' 'netif_rx_ni(' 'return init_dummy_netdev(dev);'; do
+	# strlcpy 用词边界排除 nla_strlcpy（后者单独替换为 nla_strscpy）。
+	n=$(grep -rlE '(^|[^[:alnum:]_])strlcpy\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	[ "$n" -eq 0 ] || die "API 归一化未覆盖: strlcpy(（$n 文件）"
+	for pat in 'nla_strlcpy(' 'rtc_time_to_tm(' 'netif_rx_ni(' 'return init_dummy_netdev(dev);'; do
 		n=$(grep -rlF "$pat" "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 		[ "$n" -eq 0 ] || die "API 归一化未覆盖: $pat（$n 文件）"
 	done
