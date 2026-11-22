@@ -4,6 +4,15 @@
 # 6.18 把 struct page_frag_cache 改成 encoded_page（include/linux/page_frag_cache.h），
 # 源码里的 .va / pagecnt_bias 手工 drain 全部失效。>=6.18 统一改用
 # page_frag_cache_drain(&cache)；旧路径保留在 #else，辅助函数随之只在旧内核编译。
+--- a/Makefile
++++ b/Makefile
+@@ -1,4 +1,6 @@
+ ccflags-y += $(MODULE_FLAGS) -Inet/nat -I$(PKG_BUILD_DIR)../warp -I$(PKG_BUILD_DIR)../warp/mcu -DCONFIG_WARP_VERSION=$(CONFIG_WARP_VERSION)
++# GCC 14 把三类转换/返回不匹配默认升级为错误（源码是 6.12 基线）
++ccflags-y += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=return-mismatch
+ 
+ ifeq ($(CONFIG_WARP_ATC_SUPPORT), y)
+ ccflags-y += -DCONFIG_WARP_ATC_SUPPORT
 --- a/warp_bm_v2.c
 +++ b/warp_bm_v2.c
 @@ -5,6 +5,9 @@
