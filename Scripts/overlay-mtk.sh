@@ -187,8 +187,20 @@ if [ -d "$MTK_DRV" ]; then
 		[ -f "$mk" ] || continue
 		grep -q -- '-DKTHREAD_SUPPORT' "$mk" \
 			|| echo 'KCFLAGS += -DKTHREAD_SUPPORT' >> "$mk"
-		note "KCFLAGS += -DKTHREAD_SUPPORT（kthread_run 分支）: ${mk#"$WRT_DIR"/}"
+		# GCC 14 把 int-conversion / incompatible-pointer-types /
+		# return-mismatch 默认升级为错误；6.6 闭源树没有适配。只降级这三类，
+		# 其它内核强错误（implicit-function-declaration 等）仍保留。
+		grep -q 'Wno-error=incompatible-pointer-types' "$mk" \
+			|| echo 'KCFLAGS += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=return-mismatch' >> "$mk"
+		note "KCFLAGS += -DKTHREAD_SUPPORT + GCC14 三类降级: ${mk#"$WRT_DIR"/}"
 	done
+
+	# warp 走自己的 ccflags-y（不接收 KCFLAGS），单独追加同样的降级项。
+	WARP_MK="$MTK_DRV/warp/src/Makefile"
+	if [ -f "$WARP_MK" ] && ! grep -q 'Wno-error=incompatible-pointer-types' "$WARP_MK"; then
+		echo 'ccflags-y += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=return-mismatch' >> "$WARP_MK"
+		note "warp: GCC14 三类降级"
+	fi
 
 	# 6.12 起内核把 -Wmissing-prototypes / -Wmissing-declarations 放进默认
 	# KBUILD_CFLAGS，pdn 的 6.6 闭源树从未面对这两个检查；这些包又用 -Werror
