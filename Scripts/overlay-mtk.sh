@@ -187,6 +187,18 @@ if [ -d "$MW_PATCHES" ]; then
 	note "mt_wifi：装载 patches-7673/050-6.18-api.patch"
 fi
 
+# apk 的版本校验比 opkg 严格：6.18.55.TEST-r1 / 空版本会被 apk mkpkg 拒绝
+# （ERROR: info field 'version' has invalid value）。pdn 的几个 kmod 包用
+# PKG_VERSION:=TEST 或留空，KernelPackage 会拼出非法版本；统一改为 1.0。
+for mk in "$MTK_DRV/mt_wifi7/Makefile" "$MTK_DRV/mt_hwifi/Makefile" \
+	"$MTK_DRV/mt_wifi_cmn/Makefile" "$MTK_DRV/warp/Makefile"; do
+	[ -f "$mk" ] || continue
+	sed -i -E 's/^PKG_VERSION:=(TEST)?$/PKG_VERSION:=1.0/' "$mk"
+	grep -qE '^PKG_VERSION:=(TEST)?$' "$mk" \
+		&& die "非法 PKG_VERSION 未修正: ${mk#"$WRT_DIR"/}"
+done
+note "pdn kmod PKG_VERSION → 1.0（apk 版本校验）"
+
 # ---------------------------------------------------------------------------
 # [2b] 6.18 内核 API 机械归一化（只做语义等价替换，不动控制流）
 #
