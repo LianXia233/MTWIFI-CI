@@ -183,6 +183,7 @@ jobs:
         run: cd wrt && make download -j"$(nproc)"
 
       - name: 编译固件（失败自动定位断点包做 V=s 采集）
+        id: build
         if: ${{ !inputs.test-mode }}
         run: |
           cd wrt
@@ -243,6 +244,20 @@ jobs:
         uses: actions/cache/save@v6
         with:
           key: ${{ steps.meta.outputs.cache-key }}
+          path: |
+            wrt/.ccache
+            wrt/staging_dir/host*
+            wrt/staging_dir/tool*
+
+      # 构建失败时也缓存宿主工具与交叉工具链：失败发生在 package 阶段时它们已完整，
+      # 下一轮 restore-keys 会命中 <prefix>-diag，省掉 ~1.5h 的工具链重建。
+      # 固定 key，避免每次失败都产生一份新缓存；已存在时保存报错由 continue-on-error 吞掉。
+      - name: 保存诊断缓存（失败时复用宿主/工具链）
+        if: ${{ !inputs.test-mode && steps.build.outcome == 'failure' && steps.cache-restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          key: ${{ steps.meta.outputs.cache-prefix }}-diag
           path: |
             wrt/.ccache
             wrt/staging_dir/host*
