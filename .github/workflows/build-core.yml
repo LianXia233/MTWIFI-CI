@@ -182,17 +182,43 @@ jobs:
         if: ${{ !inputs.test-mode }}
         run: cd wrt && make download -j"$(nproc)"
 
-      - name: 编译固件（失败自动串行 V=s 采集断点）
+      - name: 编译固件（失败自动定位断点包做 V=s 采集）
         if: ${{ !inputs.test-mode }}
         run: |
           cd wrt
           set -o pipefail
-          mkdir -p "$GITHUB_WORKSPACE/build-reports"
-          if ! make -j"$(nproc)" 2>&1 | tee "$GITHUB_WORKSPACE/build-reports/parallel.log"; then
-            echo "=== 并行构建失败，降级串行 V=s 采集断点 ==="
-            make -j1 V=s 2>&1 | tee "$GITHUB_WORKSPACE/build-reports/serial.log" || true
+          LOG="$GITHUB_WORKSPACE/build-reports"
+          mkdir -p "$LOG"
+          # -k：并行阶段尽量跑完，一次暴露多个失败包；默认首个失败即停，会让每个断点
+          # 各吃一轮完整构建（单轮约 2h）。失败包的 V=s 细节在下面的回退阶段采集。
+          if make -k -j"$(nproc)" 2>&1 | tee "$LOG/parallel.log"; then
+            exit 0
+          fi
+
+          echo "=== 并行构建失败，提取失败包并逐个 V=s 重编译 ==="
+          : > "$LOG/serial.log"
+          failed=$(sed -n 's/.*ERROR: \(.*\) failed to build.*/\1/p' "$LOG/parallel.log" | sort -u)
+          if [ -n "$failed" ]; then
+            rebuild_failed=0
+            for pkg in $failed; do
+              echo "===== V=s 重编译失败包: $pkg =====" | tee -a "$LOG/serial.log"
+              if ! make "$pkg/compile" V=s -j1 2>&1 | tee -a "$LOG/serial.log"; then
+                rebuild_failed=1
+              fi
+            done
+            if [ "$rebuild_failed" -eq 0 ]; then
+              # 失败包在串行下全部通过 = 并行依赖竞态；转 -j1 继续，避免白跑一整轮。
+              echo "=== 失败包串行重建全部通过（并行竞态），转 -j1 继续 ===" | tee -a "$LOG/serial.log"
+              make -j1 2>&1 | tee -a "$LOG/serial.log" || exit 1
+              exit 0
+            fi
             exit 1
           fi
+
+          # 没有包级 ERROR（内核 / target 级断点）：回退完整串行 V=s。
+          echo "=== 未解析到包级失败，回退 -j1 V=s ===" | tee -a "$LOG/serial.log"
+          make -j1 V=s 2>&1 | tee -a "$LOG/serial.log" || true
+          exit 1
 
       - name: 产物级移植校验
         if: ${{ !inputs.test-mode }}

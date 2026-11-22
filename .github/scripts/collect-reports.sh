@@ -66,12 +66,18 @@ KDIR=$(ls -d "$WRT"/build_dir/target-*/linux-*/linux-* 2>/dev/null | head -n1)
 # 无论是否命中，文件里都写一行状态，便于直接判断"没有断点"还是"没采到"。
 # ---------------------------------------------------------------------------
 for log in "$REPORT/parallel.log" "$REPORT/serial.log"; do
-	if [ -f "$log" ] && [ "$(wc -l < "$log")" -gt 800 ]; then
+	if [ -f "$log" ] && [ "$(wc -l < "$log")" -gt 0 ]; then
 		tail -n 500 "$log" > "${log%.log}.tail.txt"
 		grep -nE 'Error [0-9]+|error:|undefined reference|No rule to make target' "$log" \
 			| tail -n 100 > "${log%.log}.errors.txt" || true
 	fi
 done
+
+# 并行阶段 -k 汇总出的失败包清单（工作流的定向 V=s 重编译也以此为准）
+if [ -f "$REPORT/parallel.log" ]; then
+	sed -n 's/.*ERROR: \(.*\) failed to build.*/\1/p' "$REPORT/parallel.log" \
+		| sort -u > "$REPORT/failed-packages.txt"
+fi
 
 {
 	echo "# 内核补丁 / 代码断点（来源：build-reports/serial.log）"
