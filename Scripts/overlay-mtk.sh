@@ -224,6 +224,7 @@ note "pdn kmod PKG_VERSION → 1.0（apk 版本校验）"
 #   strlcpy()       6.8 移除 → strscpy()（签名/语义等价，返回值一致丢弃）
 #   rtc_time_to_tm() 移除 → rtc_time64_to_tm()（参数由 unsigned long 放宽到 time64_t）
 #   netif_rx_ni()   6.9 移除 → netif_rx()（同样可在进程上下文调用）
+#   get_online_cpus()/put_online_cpus() 6.7 移除 → cpus_read_lock()/cpus_read_unlock()
 #   trace.h         的 struct timeval + do_gettimeofday() → timespec64 + ktime_get_real_ts64()
 # chasey 的 legacy 树已是 6.12 基线，这些符号本就不存在，替换为无操作。
 # ---------------------------------------------------------------------------
@@ -234,16 +235,19 @@ if [ -d "$MTK_DRV" ]; then
 	RTM=$(grep -rl 'rtc_time_to_tm(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	NRN=$(grep -rl 'netif_rx_ni(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	PDM=$(grep -rl 'pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
-	grep -rl 'strlcpy(\|nla_strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(\|pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" \
+	GOC=$(grep -rlE '(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	grep -rlE 'strlcpy(\|nla_strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(\|pci_set_dma_mask(\|pci_set_consistent_dma_mask(\|(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null |
 		xargs -r sed -i \
 			-e 's/\bstrlcpy(/strscpy(/g' \
 			-e 's/\bnla_strlcpy(/nla_strscpy(/g' \
 			-e 's/\brtc_time_to_tm(/rtc_time64_to_tm(/g' \
 			-e 's/\bnetif_rx_ni(/netif_rx(/g' \
+			-e 's/\bget_online_cpus(/cpus_read_lock(/g' \
+			-e 's/\bput_online_cpus(/cpus_read_unlock(/g' \
 			-e 's/pci_set_dma_mask(pdev, /dma_set_mask(\&pdev->dev, /g' \
 			-e 's/pci_set_consistent_dma_mask(pdev, /dma_set_coherent_mask(\&pdev->dev, /g'
-	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | pci_set_dma_mask→dma_set_mask: $PDM 文件"
+	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | pci_set_dma_mask→dma_set_mask: $PDM 文件"
 
 	find "$MTK_DRV" -path '*/include/os/trace.h' -type f -print0 |
 	while IFS= read -r -d '' trace_h; do
@@ -340,6 +344,10 @@ if [ -d "$MTK_DRV" ]; then
 		n=$(grep -rlF "$pat" "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 		[ "$n" -eq 0 ] || die "API 归一化未覆盖: $pat（$n 文件）"
 	done
+	# 用词边界排除 mt_get_online_cpus 这类包装函数名
+	n=$(grep -rlE '(^|[^[:alnum:]_])(get|put)_online_cpus\(' "$MTK_DRV" \
+		--include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	[ "$n" -eq 0 ] || die "API 归一化未覆盖: get/put_online_cpus(（$n 文件）"
 	TRACE_LEFT=$(find "$MTK_DRV" -path '*/include/os/trace.h' -type f \
 		-exec grep -l 'do_gettimeofday(&time);' {} + 2>/dev/null | wc -l)
 	[ "$TRACE_LEFT" -eq 0 ] || die "trace.h 时间戳归一化未覆盖（$TRACE_LEFT 文件）"
