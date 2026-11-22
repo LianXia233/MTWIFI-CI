@@ -196,14 +196,17 @@ if [ -d "$MTK_DRV" ]; then
 	NLA=$(grep -rl 'nla_strlcpy(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	RTM=$(grep -rl 'rtc_time_to_tm(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	NRN=$(grep -rl 'netif_rx_ni(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
-	grep -rl 'strlcpy(\|nla_strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(' "$MTK_DRV" \
+	PDM=$(grep -rl 'pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	grep -rl 'strlcpy(\|nla_strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(\|pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null |
 		xargs -r sed -i \
 			-e 's/\bstrlcpy(/strscpy(/g' \
 			-e 's/\bnla_strlcpy(/nla_strscpy(/g' \
 			-e 's/\brtc_time_to_tm(/rtc_time64_to_tm(/g' \
-			-e 's/\bnetif_rx_ni(/netif_rx(/g'
-	note "strlcpy→strscpy: $SLC 文件 | nla_strlcpy→nla_strscpy: $NLA 文件 | rtc_time_to_tm→rtc_time64_to_tm: $RTM 文件 | netif_rx_ni→netif_rx: $NRN 文件"
+			-e 's/\bnetif_rx_ni(/netif_rx(/g' \
+			-e 's/pci_set_dma_mask(pdev, /dma_set_mask(\&pdev->dev, /g' \
+			-e 's/pci_set_consistent_dma_mask(pdev, /dma_set_coherent_mask(\&pdev->dev, /g'
+	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | pci_set_dma_mask→dma_set_mask: $PDM 文件"
 
 	find "$MTK_DRV" -path '*/include/os/trace.h' -type f -print0 |
 	while IFS= read -r -d '' trace_h; do
@@ -267,6 +270,17 @@ if [ -d "$MTK_DRV" ]; then
 	done
 	note "init_dummy_netdev 就地初始化: $DMY 文件"
 
+	# proc_create_data() 自 5.6 起第 4 参数是 struct proc_ops *；
+	# pdn 的 mt_fwdump.c（os/linux/rules.mk 无条件编入）仍用 file_operations。
+	FWD=$(grep -rl 'static const struct file_operations fops_dump' "$MTK_DRV" --include='*.c' 2>/dev/null | wc -l)
+	grep -rl 'static const struct file_operations fops_dump' "$MTK_DRV" --include='*.c' 2>/dev/null |
+	while IFS= read -r f; do
+		perl -0777 -pi -e 's/static const struct file_operations fops_dump = \{\n\t\.owner = THIS_MODULE,\n\t\.open = fwdumpopen,\n\t\.read = fwdumpread,\n\t\.write = fwdumpwrite,\n\};/#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0)\nstatic const struct proc_ops fops_dump = {\n\t.proc_open = fwdumpopen,\n\t.proc_read = fwdumpread,\n\t.proc_write = fwdumpwrite,\n};\n#else\nstatic const struct file_operations fops_dump = {\n\t.owner = THIS_MODULE,\n\t.open = fwdumpopen,\n\t.read = fwdumpread,\n\t.write = fwdumpwrite,\n};\n#endif/s' "$f"
+		grep -q 'struct proc_ops fops_dump' "$f" \
+			|| die "mt_fwdump proc_ops 替换失败: ${f#"$WRT_DIR"/}"
+	done
+	note "mt_fwdump → proc_ops: $FWD 文件"
+
 	# warp 的 platform_driver.remove 仍是 int；6.11 起必须返回 void
 	# （GCC 14 下是 -Wincompatible-pointer-types 错误）。
 	for f in "$MTK_DRV/warp/src/warp_main.c" \
@@ -284,7 +298,8 @@ if [ -d "$MTK_DRV" ]; then
 	# strlcpy 用词边界排除 nla_strlcpy（后者单独替换为 nla_strscpy）。
 	n=$(grep -rlE '(^|[^[:alnum:]_])strlcpy\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	[ "$n" -eq 0 ] || die "API 归一化未覆盖: strlcpy(（$n 文件）"
-	for pat in 'nla_strlcpy(' 'rtc_time_to_tm(' 'netif_rx_ni(' 'return init_dummy_netdev(dev);'; do
+	for pat in 'nla_strlcpy(' 'rtc_time_to_tm(' 'netif_rx_ni(' 'return init_dummy_netdev(dev);' \
+		'pci_set_dma_mask(pdev,' 'pci_set_consistent_dma_mask(pdev,'; do
 		n=$(grep -rlF "$pat" "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 		[ "$n" -eq 0 ] || die "API 归一化未覆盖: $pat（$n 文件）"
 	done
