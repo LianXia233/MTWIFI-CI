@@ -235,6 +235,15 @@ else
 	note "WARN: 跳过 mt_eeprom_* 后备（缺 $EEPROM_C 或 wifi_utility 目录）"
 fi
 
+# platform_driver.remove 自 6.11 起返回 void；pdn 的 rbus_remove 仍是 int，
+# 在 GCC 14 下是 incompatible-pointer-types 错误。
+RBUS="$WU_DIR/pci_mediatek_rbus.c"
+if [ -f "$RBUS" ]; then
+	sed -i 's/^static int rbus_remove(struct platform_device \*pdev)$/static void rbus_remove(struct platform_device *pdev)/' "$RBUS"
+	sed -i '/^static void rbus_remove(struct platform_device \*pdev)$/,/^}$/ { /^\treturn 0;$/d }' "$RBUS"
+	note "rbus_remove → void（6.18 platform_driver.remove）"
+fi
+
 # ---------------------------------------------------------------------------
 # [4] kmod-mediatek_hnat 包定义挂入 netdevices.mk
 #     eth-91 的 Kconfig 补丁会引入 MEDIATEK_NETSYS_V2/V3 与 NET_MEDIATEK_HNAT

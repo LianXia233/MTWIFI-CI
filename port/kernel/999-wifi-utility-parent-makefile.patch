@@ -1,0 +1,21 @@
+SPDX-License-Identifier: MIT
+# 6.18 移植：让 files-6.18 里的 wifi_utility 参与内核编译
+#
+# pdn 的 files-6.6 只提供 wifi_utility/ 目录；真正把它挂进构建的是
+# patches-6.6/0101-add-mtk-wifi-utility-rbus.patch 里的 obj-y 一行。
+# 本仓库只搬 files 层，缺这行时 mt_mtd_read_nm_wifi()/mt_mtd_write_nm_wifi()
+# 不会编入内核：
+#   - conninfra（chasey 010 补丁经 mt_eeprom_* 调用）
+#   - AP legacy mt_wifi（7672/7673 的 eeprom-flash-api 补丁）
+#   - H5 mt_wifi7/mt_hwifi（CONFIG_WIFI_MTD 分支）
+# 都会在模块 modpost 阶段报 undefined symbol。
+--- a/drivers/net/wireless/Makefile
++++ b/drivers/net/wireless/Makefile
+@@ -11,6 +11,7 @@
+ obj-$(CONFIG_WLAN_VENDOR_INTERSIL) += intersil/
+ obj-$(CONFIG_WLAN_VENDOR_MARVELL) += marvell/
+ obj-$(CONFIG_WLAN_VENDOR_MEDIATEK) += mediatek/
++obj-y += wifi_utility/
+ obj-$(CONFIG_WLAN_VENDOR_MICROCHIP) += microchip/
+ obj-$(CONFIG_WLAN_VENDOR_PURELIFI) += purelifi/
+ obj-$(CONFIG_WLAN_VENDOR_QUANTENNA) += quantenna/
