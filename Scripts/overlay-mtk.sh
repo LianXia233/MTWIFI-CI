@@ -128,6 +128,45 @@ while IFS= read -r -d '' app; do
 done < <(find "$SRC_DIR/chasey/package/mtk/applications" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
 # ---------------------------------------------------------------------------
+# [2b] 6.18 内核 API 机械归一化（只做语义等价替换，不动控制流）
+#
+# pdn 的 wifi7/hwifi 树来自 6.6，仍在使用 6.8+ 已移除的符号。这些调用点的
+# 返回值都被丢弃，逐个写补丁不如在 overlay 阶段统一归一化：
+#   strlcpy()       6.8 移除 → strscpy()（签名/语义等价，返回值一致丢弃）
+#   rtc_time_to_tm() 移除 → rtc_time64_to_tm()（参数由 unsigned long 放宽到 time64_t）
+#   netif_rx_ni()   6.9 移除 → netif_rx()（同样可在进程上下文调用）
+#   trace.h         的 struct timeval + do_gettimeofday() → timespec64 + ktime_get_real_ts64()
+# chasey 的 legacy 树已是 6.12 基线，这些符号本就不存在，替换为无操作。
+# ---------------------------------------------------------------------------
+log "[2b/6] 6.18 内核 API 机械归一化"
+MTK_DRV="$WRT_DIR/package/mtk/drivers"
+if [ -d "$MTK_DRV" ]; then
+	SLC=$(grep -rl 'strlcpy(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	RTM=$(grep -rl 'rtc_time_to_tm(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	NRN=$(grep -rl 'netif_rx_ni(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	grep -rl 'strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(' "$MTK_DRV" \
+		--include='*.c' --include='*.h' 2>/dev/null |
+		xargs -r sed -i \
+			-e 's/\bstrlcpy(/strscpy(/g' \
+			-e 's/\brtc_time_to_tm(/rtc_time64_to_tm(/g' \
+			-e 's/\bnetif_rx_ni(/netif_rx(/g'
+	note "strlcpy→strscpy: $SLC 文件 | rtc_time_to_tm→rtc_time64_to_tm: $RTM 文件 | netif_rx_ni→netif_rx: $NRN 文件"
+
+	find "$MTK_DRV" -path '*/include/os/trace.h' -type f -print0 |
+	while IFS= read -r -d '' trace_h; do
+		grep -q 'linux/timekeeping.h' "$trace_h" \
+			|| sed -i 's|#include <linux/time\.h>|#include <linux/time.h>\n#include <linux/timekeeping.h>|' "$trace_h"
+		sed -i \
+			-e 's/struct timeval time;/struct timespec64 time;/g' \
+			-e 's/do_gettimeofday(&time);/ktime_get_real_ts64(\&time);/g' \
+			"$trace_h"
+		note "trace.h 时间戳 → timespec64/ktime_get_real_ts64: ${trace_h#"$WRT_DIR"/}"
+	done
+else
+	note "WARN: 无 package/mtk/drivers，跳过 API 归一化"
+fi
+
+# ---------------------------------------------------------------------------
 # [3] mtk_hnat / wifi_utility 内核源码 → files-6.18（files/ 在构建期覆盖内核树）
 # ---------------------------------------------------------------------------
 log "[3/6] 叠加内核驱动源码到 files-$KVER"
