@@ -395,10 +395,11 @@ SPDX-License-Identifier: MIT
  #-DDBG_DIAGNOSE -DDBG_RX_MCS -DDBG_TX_MCS
  
  EXTRA_CFLAGS += -DCONFIG_AP_SUPPORT -DSCAN_SUPPORT -DAP_SCAN_SUPPORT
-@@ -3040,3 +3040,6 @@
+@@ -3040,3 +3040,7 @@
  MODULE_FLAGS=$(EXTRA_CFLAGS)
  export MODULE_FLAGS
  obj-m+=$(SRC_EMBEDDED_DIR)/plug_in/
 +
 +# 6.18 port: GCC 14 把三类转换/返回不匹配默认升级为错误
++ccflags-y += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=return-mismatch
 +EXTRA_CFLAGS += -Wno-error=incompatible-pointer-types -Wno-error=int-conversion -Wno-error=return-mismatch
