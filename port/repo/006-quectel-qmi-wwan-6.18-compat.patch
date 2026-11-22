@@ -1,0 +1,38 @@
+SPDX-License-Identifier: MIT
+# 6.18 移植适配：qmi_wwan_q (Quectel) 内核 API 收敛
+#
+# 上游断点（两台设备 6.18.55 构建同报）：
+#   error: implicit declaration of function 'hrtimer_init'; did you mean 'hrtimers_init'?
+#   error: implicit declaration of function 'strlcpy'; did you mean 'strncpy'?
+# hrtimer_init() 在 6.13 被 hrtimer_setup() 取代，strlcpy() 在 6.8 被移除
+# （由 strscpy() 接替）。此处用 LINUX_VERSION_CODE 双分支保留旧内核兼容。
+--- a/package/mtk/applications/5g-modem/quectel_QMI_WWAN/src/qmi_wwan_q.c
++++ b/package/mtk/applications/5g-modem/quectel_QMI_WWAN/src/qmi_wwan_q.c
+@@ -1317,8 +1317,13 @@
+ 
+ 	priv->agg_skb = NULL;
+ 	priv->agg_count = 0;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
++	hrtimer_setup(&priv->agg_hrtimer, rmnet_usb_tx_agg_timer_cb,
++	              CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++#else
+ 	hrtimer_init(&priv->agg_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+ 	priv->agg_hrtimer.function = rmnet_usb_tx_agg_timer_cb;
++#endif
+ 	INIT_WORK(&priv->agg_wq, rmnet_usb_tx_agg_work);
+ 	ktime_get_ts64(&priv->agg_time);
+ 	spin_lock_init(&priv->agg_lock);
+@@ -1949,8 +1954,13 @@
+ {
+ 	/* Inherit standard device info */
+ 	usbnet_get_drvinfo(net, info);
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
++	strscpy(info->driver, driver_name, sizeof(info->driver));
++	strscpy(info->version, VERSION_NUMBER, sizeof(info->version));
++#else
+ 	strlcpy(info->driver, driver_name, sizeof(info->driver));
+ 	strlcpy(info->version, VERSION_NUMBER, sizeof(info->version));
++#endif
+ }
+ 
+ static struct ethtool_ops ql_net_ethtool_ops;

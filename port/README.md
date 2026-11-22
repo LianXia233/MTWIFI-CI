@@ -105,6 +105,8 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `999-hnat-21-*` | `ppp_channel_ops` 在 6.18 没有 `flow_offload_check`（由 `999-hnat-06` 引入）；`session->tunnel` 可能为 NULL | 回调按真实成员表落位；取 tunnel 前先 `READ_ONCE` 快照并判空 |
 | `999-hnat-23-*` | 6.18 的 `mtk_pending_work()` 在 `mtk_hw_init(eth, true)` 之后立即重开设备 | 在两者之间广播 `MTK_FE_RESET_NAT_DONE`，事件号放进新建的 `mtk_eth_reset.h` 供两侧共用 |
 | `999-hnat-24/25/39/40` | 见上节表格 | 按 6.18 结构新写 |
+| `port/repo/005-fibocom-qmi-wwan-6.18-compat.patch` | `qmi_wwan_f.c`（`fibocom_QMI_WWAN`）：6.13 移除 `hrtimer_init()`、6.8 移除 `strlcpy()`，编译报 implicit declaration | `hrtimer_setup()` / `strscpy()` 双分支，`LINUX_VERSION_CODE` 守卫保留旧内核兼容 |
+| `port/repo/006-quectel-qmi-wwan-6.18-compat.patch` | `qmi_wwan_q.c`（`quectel_QMI_WWAN`）：同上两处 API | 同上 |
 
 验证方式：必须按 quilt 的真实顺序重建目录——先铺 `files/`、`files-6.18`
 （`Kernel/Patch/Default` 是"先覆盖文件，再打补丁"），再依次应用
@@ -149,6 +151,10 @@ Actions 构建
 4. WED：mt_wifi7 的 whnat 与主线 `mtk_wed` 的符号面需要核对。
 5. 外接交换机（802.1Q tag 判定）：6.18 未移植其 tagger 与驱动，判定按
    `CONFIG_NET_DSA_TAG_MXL862_8021Q` 条件编译；要支持该芯片需整组移植。 
+6. 5G 模组驱动（pdn `5g-modem/*_QMI_WWAN`）：`qmodem` 的默认配置会选中
+   `kmod-qmi_wwan_f/m/q/s`。其中 fibocom / quectel 两版已按 6.18 收敛
+   `hrtimer_init`、`strlcpy`；meig 版与 QModem 的 simcom 版未用到被移除的 API。
+   后续升级内核时优先复查这三类符号。
 
 ## 打补丁规范
 
