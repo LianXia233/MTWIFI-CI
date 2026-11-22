@@ -175,6 +175,16 @@ if [ -d "$MTK_DRV" ]; then
 			|| echo 'KCFLAGS += -DKTHREAD_SUPPORT' >> "$mk"
 		note "KCFLAGS += -DKTHREAD_SUPPORT（kthread_run 分支）: ${mk#"$WRT_DIR"/}"
 	done
+
+	# init_dummy_netdev() 在 6.18 变成内核内部函数，公开 API 只剩分配式的
+	# alloc_netdev_dummy()。驱动把 struct net_device 内嵌在私有结构里，只能按
+	# 6.12 的语义就地初始化（清零 + NETREG_DUMMY + PRESENT/START）。
+	DMY=$(grep -rl 'return init_dummy_netdev(dev);' "$MTK_DRV" --include='*.c' 2>/dev/null | wc -l)
+	grep -rl 'return init_dummy_netdev(dev);' "$MTK_DRV" --include='*.c' 2>/dev/null |
+	while IFS= read -r f; do
+		perl -0777 -pi -e 's/int mt_init_dummy_netdev\(struct net_device \*dev\)\s*\{\s*return init_dummy_netdev\(dev\);\s*\}/int mt_init_dummy_netdev(struct net_device *dev)\n{\n\tmemset(dev, 0, sizeof(*dev));\n\tdev->reg_state = NETREG_DUMMY;\n\tset_bit(__LINK_STATE_PRESENT, &dev->state);\n\tset_bit(__LINK_STATE_START, &dev->state);\n\treturn 0;\n}/s' "$f"
+	done
+	note "init_dummy_netdev 就地初始化: $DMY 文件"
 else
 	note "WARN: 无 package/mtk/drivers，跳过 API 归一化"
 fi

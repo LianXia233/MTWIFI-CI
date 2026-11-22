@@ -109,7 +109,7 @@ HNAT 的 DTS 节点改由本目录直接维护：
 | `port/repo/005-fibocom-qmi-wwan-6.18-compat.patch` | `qmi_wwan_f.c`（`fibocom_QMI_WWAN`）：6.13 移除 `hrtimer_init()`、6.8 移除 `strlcpy()`，编译报 implicit declaration | `hrtimer_setup()` / `strscpy()` 双分支，`LINUX_VERSION_CODE` 守卫保留旧内核兼容 |
 | `port/repo/006-quectel-qmi-wwan-6.18-compat.patch` | `qmi_wwan_q.c`（`quectel_QMI_WWAN`）：同上两处 API | 同上 |
 | `port/wifi-utility/mt_eeprom_*` | legacy 栈 `conninfra` 与 `mt_wifi` 767x 调用 `mt_eeprom_read_wifi()`/`mt_eeprom_write_wifi()`（chasey 999-zzz-5203 引入）；6.18 只搬了 pdn 的 `wifi_utility`（仅 `mt_mtd_*`），模块 modpost 报 undefined | overlay 在 `files-6.18/.../wifi_utility/` 补最小实现（`Factory` → `factory` 回退）并挂进 Makefile；OF/nvmem 后端暂不移植（AP3000M 的 factory 分区由首启脚本写入） |
-| overlay `[2b]`（非补丁） | pdn 6.6 树仍在用 6.8+ 已移除的符号：`strlcpy()`（138 处）、`rtc_time_to_tm()`、`netif_rx_ni()`；`trace.h` 用 `struct timeval` + `do_gettimeofday()`；`rt_linux.c` 默认走未导出的 `kernel_thread()`，并有 `#error "Not yet implemented"` | 语义等价替换为 `strscpy()`、`rtc_time64_to_tm()`、`netif_rx()`、`timespec64` + `ktime_get_real_ts64()`；包 Makefile 的 `KCFLAGS` 加 `-DKTHREAD_SUPPORT` 切到厂商的 `kthread_run` 分支（OpenWrt 路径不包含 `config_common.mk`，`CONFIG_KTHREAD_SUPPORT` 不会生效） |
+| overlay `[2b]`（非补丁） | pdn 6.6 树仍在用 6.8+ 已移除的符号：`strlcpy()`（138 处）、`rtc_time_to_tm()`、`netif_rx_ni()`、`init_dummy_netdev()`；`trace.h` 用 `struct timeval` + `do_gettimeofday()`；`rt_linux.c` 默认走未导出的 `kernel_thread()`，并有 `#error "Not yet implemented"` | 语义等价替换为 `strscpy()`、`rtc_time64_to_tm()`、`netif_rx()`、就地 dummy netdev 初始化、`timespec64` + `ktime_get_real_ts64()`；包 Makefile 的 `KCFLAGS` 加 `-DKTHREAD_SUPPORT` 切到厂商的 `kthread_run` 分支（OpenWrt 路径不包含 `config_common.mk`，`CONFIG_KTHREAD_SUPPORT` 不会生效） |
 
 验证方式：必须按 quilt 的真实顺序重建目录——先铺 `files/`、`files-6.18`
 （`Kernel/Patch/Default` 是"先覆盖文件，再打补丁"），再依次应用
