@@ -50,6 +50,20 @@ KVER=$(sed -n 's/^KERNEL_PATCHVER:=//p' "$WRT_DIR/target/linux/mediatek/Makefile
 [ -n "$KVER" ]                                        || die "无法解析 KERNEL_PATCHVER"
 note "基线内核: $KVER | cwd: $WRT_DIR"
 
+# 内核 WEXT：基座 generic/config-$KVER 关闭了 WIRELESS_EXT/WEXT_PRIV，但两套
+# 闭源栈的 wireless_handlers / private ioctl 路径都依赖它们（mtwifi-cfg 通过
+# SIOCGIWPRIV 配置）。vanilla 6.18 的这两个符号是无提示 bool，.config 里的 =y
+# 会被 oldconfig 丢弃，因此配合 port/kernel/999-wireless-ext-kconfig.patch 补提示。
+WEXT_CFG="$WRT_DIR/target/linux/mediatek/filogic/config-$KVER"
+if [ -f "$WEXT_CFG" ]; then
+	for sym in CONFIG_WIRELESS_EXT CONFIG_WEXT_PRIV; do
+		grep -q "^$sym=y" "$WEXT_CFG" || echo "$sym=y" >> "$WEXT_CFG"
+	done
+	note "kernel WEXT: WIRELESS_EXT / WEXT_PRIV = y（filogic/config-$KVER）"
+else
+	note "WARN: 缺 $WEXT_CFG，跳过 kernel WEXT 配置"
+fi
+
 # 驱动栈判定：两平台独立适配（任务书要求），不允许混装两代闭源无线栈
 #   H5000M* → wifi7  栈：pdn 树（mt_wifi7 + mt_wifi_cmn + mt_hwifi + warp + wifi-profile）
 #   AP3000M* → legacy 栈：chasey 树（mt_wifi 7.6x + conninfra + warp + wifi-profile）

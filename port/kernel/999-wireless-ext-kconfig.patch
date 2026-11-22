@@ -1,0 +1,29 @@
+SPDX-License-Identifier: MIT
+# 6.18 移植：给 WIRELESS_EXT / WEXT_PRIV 加 Kconfig 提示
+#
+# 基座 generic/config-6.18 把这两个符号写成 "# ... is not set"，而 vanilla
+# 6.18 的 net/wireless/Kconfig 里它们是 **无提示 bool**：只在 .config 里写
+# =y 会在 oldconfig 阶段被丢弃。legacy 闭源 mt_wifi 的 private ioctl /
+# wireless_handlers 路径依赖内核 WEXT（CONFIG_WEXT_PRIV / CONFIG_WEXT_CORE），
+# 因此按 pdn 0101 的做法补上提示，使 filogic 子目标的 =y 生效。
+#
+# 注意：WEXT_SPY 在 6.18 已被移除（wext-spy.c 不存在），不再补。
+--- a/net/wireless/Kconfig
++++ b/net/wireless/Kconfig
+@@ -1,6 +1,6 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ config WIRELESS_EXT
+-	bool
++	bool "Wireless extensions"
+ 
+ config WEXT_CORE
+ 	def_bool y
+@@ -12,7 +12,7 @@
+ 	depends on WEXT_CORE
+ 
+ config WEXT_PRIV
+-	bool
++	bool "WEXT_PRIV"
+ 
+ config CFG80211
+ 	tristate "cfg80211 - wireless configuration API"
