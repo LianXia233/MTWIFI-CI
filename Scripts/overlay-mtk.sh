@@ -162,6 +162,19 @@ if [ -d "$MTK_DRV" ]; then
 			"$trace_h"
 		note "trace.h 时间戳 → timespec64/ktime_get_real_ts64: ${trace_h#"$WRT_DIR"/}"
 	done
+
+	# kernel_thread() 未导出，且 5.10 起签名改为 (fn, arg, name, flags)；
+	# 驱动在未定义 KTHREAD_SUPPORT 时走的正是这条老路径（rt_linux.c 里还有
+	# #error "Not yet implemented"），模块必然编译/链接失败。
+	# OpenWrt 包不走 CONFIG_NATIVE_CFG，mk/config/config_common.mk 不会被包含，
+	# 所以直接在包 Makefile 的 KCFLAGS 里定义 KTHREAD_SUPPORT，切到厂商的
+	# kthread_run 分支（init/kill/wait 代码齐全）。
+	for mk in "$MTK_DRV/mt_wifi7/Makefile" "$MTK_DRV/mt_hwifi/Makefile"; do
+		[ -f "$mk" ] || continue
+		grep -q -- '-DKTHREAD_SUPPORT' "$mk" \
+			|| echo 'KCFLAGS += -DKTHREAD_SUPPORT' >> "$mk"
+		note "KCFLAGS += -DKTHREAD_SUPPORT（kthread_run 分支）: ${mk#"$WRT_DIR"/}"
+	done
 else
 	note "WARN: 无 package/mtk/drivers，跳过 API 归一化"
 fi
