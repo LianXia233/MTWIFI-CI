@@ -83,11 +83,11 @@ CONFIG_MTK_WDS_SUPPORT=y
 CONFIG_MTK_MLME_MULTI_QUEUE_SUPPORT=y
 CONFIG_MTK_VLAN_SUPPORT=y
 
-# WARP：MT7981 对应 V2 代码（config.in 的 default 依赖 TARGET_mediatek_mt7981，
-# 本构建里该符号不成立，必须显式给字符串值，否则会退回 V1 导致寄存器宏错配）
-CONFIG_WARP_CONFIG_MODE=0
+# WARP：chasey 的 warp config.in 里 WARP_VERSION 是 int（1..3），
+# MT7981 对应 V2；config.in 的 default 依赖 TARGET_mediatek_mt7981，
+# 本构建里不成立，必须显式给值。注意这里不要加引号（int 类型）。
 CONFIG_WARP_CHIPSET="mt7981"
-CONFIG_WARP_VERSION="2"
+CONFIG_WARP_VERSION=2
 CONFIG_WARP_NEW_FW=n
 
 # ---- 闭源内核模块：mt_wifi + conninfra + warp + HNAT ----
