@@ -48,6 +48,28 @@ pull LianXia233/luci-app-qmodem-generic        main "luci-app-qmodem-generic"
 pull LianXia233/luci-app-chfs                  main "luci-app-chfs"
 pull LianXia233/luci-app-fm350                 main "luci-app-fm350"
 
+# luci-app-mt5700：src/Makefile 直接调 cargo，没有为 musl 目标指定交叉链接器，
+# CI 里会退回宿主 cc（aarch64 的 --fix-cortex-a53-843419 直接报错）。
+# OpenWrt 会 export TARGET_CC_NOCACHE；在 cargo 命令行前按 RUST_TARGET 注入
+# CARGO_TARGET_<TRIPLE>_LINKER。包后续若自行处理，检测到 _LINKER 就跳过。
+MT5700_SRC="./package/luci-app-mt5700/src/Makefile"
+if [ -f "$MT5700_SRC" ]; then
+	python3 - "$MT5700_SRC" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p, encoding='utf-8').read()
+bs = chr(92)
+anchor = '\t\tMT5700_VERSION="$(MT5700_VERSION)" ' + bs + '\n'
+add = ('\t\tCARGO_TARGET_$(shell echo $(RUST_TARGET) | tr "a-z-" "A-Z_")'
+       '_LINKER="$(TARGET_CC_NOCACHE)" ' + bs + '\n')
+if '_LINKER' not in s and anchor in s:
+    open(p, 'w', encoding='utf-8', newline='').write(s.replace(anchor, anchor + add, 1))
+    print('[feeds] luci-app-mt5700: 注入 CARGO_TARGET_*_LINKER')
+else:
+    print('[feeds] luci-app-mt5700: 已存在链接器设置或锚点未命中，跳过')
+PY
+fi
+
 # 私有扩展（存在才执行）
 if [ -f "$GITHUB_WORKSPACE/Scripts/feeds.private.sh" ]; then
 	source "$GITHUB_WORKSPACE/Scripts/feeds.private.sh"

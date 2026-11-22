@@ -1,14 +1,38 @@
 SPDX-License-Identifier: MIT
 # 6.18 移植适配：qmi_wwan_q (Quectel) 内核 API 收敛
 #
-# 上游断点（两台设备 6.18.55 构建同报）：
-#   error: implicit declaration of function 'hrtimer_init'; did you mean 'hrtimers_init'?
-#   error: implicit declaration of function 'strlcpy'; did you mean 'strncpy'?
-# hrtimer_init() 在 6.13 被 hrtimer_setup() 取代，strlcpy() 在 6.8 被移除
-# （由 strscpy() 接替）。此处用 LINUX_VERSION_CODE 双分支保留旧内核兼容。
+# 上游断点（6.18.55 构建）：
+#   error: implicit declaration of function 'hrtimer_init'
+#   error: implicit declaration of function 'strlcpy'
+#   error: 'struct usbnet' has no member named 'bh'
+# hrtimer_init() 6.13 起被 hrtimer_setup() 取代；strlcpy() 6.8 起移除
+# （strscpy 接替）；usbnet 的 bh 在 6.17 改为 work_struct（bh_work），
+# 驱动原先复用 usbnet tasklet 的聚合唤醒逻辑只能退回自己的 tasklet。
 --- a/package/mtk/applications/5g-modem/quectel_QMI_WWAN/src/qmi_wwan_q.c
 +++ b/package/mtk/applications/5g-modem/quectel_QMI_WWAN/src/qmi_wwan_q.c
-@@ -1317,8 +1317,13 @@
+@@ -867,6 +867,13 @@
+ #if defined(QUECTEL_UL_DATA_AGG)
+ static void usbnet_bh(unsigned long data) {
+ 	sQmiWwanQmap *pQmapDev = (sQmiWwanQmap *)data;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
++	/* 6.17 起 usbnet 的 bh 改为 work_struct（bh_work），无法再复用其
++	 * tasklet；保留驱动自己的 tasklet，仅执行队列唤醒。
++	 */
++	if (!netif_queue_stopped(pQmapDev->mpNetDev->net))
++		qmap_wake_queue(pQmapDev);
++#else
+ 	struct tasklet_struct *t = &pQmapDev->usbnet_bh;
+ 	bool use_callback = false;
+ 
+@@ -882,6 +889,7 @@
+ 	if (!netif_queue_stopped(pQmapDev->mpNetDev->net)) {
+ 		qmap_wake_queue((sQmiWwanQmap *)data);
+ 	}
++#endif
+ }
+ 
+ static void rmnet_usb_tx_wake_queue(unsigned long data) {
+@@ -1317,8 +1325,13 @@
  
  	priv->agg_skb = NULL;
  	priv->agg_count = 0;
@@ -22,7 +46,7 @@ SPDX-License-Identifier: MIT
  	INIT_WORK(&priv->agg_wq, rmnet_usb_tx_agg_work);
  	ktime_get_ts64(&priv->agg_time);
  	spin_lock_init(&priv->agg_lock);
-@@ -1949,8 +1954,13 @@
+@@ -1949,8 +1962,13 @@
  {
  	/* Inherit standard device info */
  	usbnet_get_drvinfo(net, info);
@@ -36,3 +60,28 @@ SPDX-License-Identifier: MIT
  }
  
  static struct ethtool_ops ql_net_ethtool_ops;
+@@ -2189,8 +2207,13 @@
+ 				}
+ 
+ 				if (pQmapDev->use_rmnet_usb && !one_card_mode) {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
++					tasklet_init(&pQmapDev->usbnet_bh, usbnet_bh,
++						     (unsigned long)pQmapDev);
++#else
+ 					pQmapDev->usbnet_bh = dev->bh;
+ 					tasklet_init(&dev->bh, usbnet_bh, (unsigned long)pQmapDev);
++#endif
+ 				}
+ 			}
+ 		}
+@@ -2575,6 +2598,10 @@
+ 		rtnl_unlock();
+ 	}
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
++	if (pQmapDev->use_rmnet_usb && !one_card_mode)
++		tasklet_kill(&pQmapDev->usbnet_bh);
++#endif
+ 	tasklet_kill(&pQmapDev->txq);
+ 	
+ 	usbnet_disconnect(intf);

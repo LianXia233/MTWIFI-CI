@@ -127,6 +127,18 @@ while IFS= read -r -d '' app; do
 	fi
 done < <(find "$SRC_DIR/chasey/package/mtk/applications" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
+# datconf：pdn 版本没有 PKG_SOURCE_URL/PKG_HASH，`make download` 拉不到源码
+# （build 期 bzcat dl/datconf-*.tar.bz2 直接失败）；chasey 版本同源同版本，
+# 且多出 ucode-mod-datconf（AP 配置需要）。两栈统一改用 chasey 版本。
+if [ -d "$SRC_DIR/chasey/package/mtk/applications/datconf" ]; then
+	rm -rf "$WRT_DIR/package/mtk/applications/datconf"
+	cp -a "$SRC_DIR/chasey/package/mtk/applications/datconf" \
+		"$WRT_DIR/package/mtk/applications/" || die "datconf 覆盖失败"
+	grep -q '^PKG_SOURCE_URL:=' "$WRT_DIR/package/mtk/applications/datconf/Makefile" \
+		|| die "datconf 仍缺 PKG_SOURCE_URL"
+	note "datconf：使用 chasey 版本（PKG_SOURCE_URL/HASH + ucode-mod-datconf）"
+fi
+
 # ---------------------------------------------------------------------------
 # [2b] 6.18 内核 API 机械归一化（只做语义等价替换，不动控制流）
 #
@@ -203,6 +215,19 @@ if [ -d "$MTK_DRV" ]; then
 		perl -0777 -pi -e 's/int mt_init_dummy_netdev\(struct net_device \*dev\)\s*\{\s*return init_dummy_netdev\(dev\);\s*\}/int mt_init_dummy_netdev(struct net_device *dev)\n{\n\tmemset(dev, 0, sizeof(*dev));\n\tdev->reg_state = NETREG_DUMMY;\n\tset_bit(__LINK_STATE_PRESENT, &dev->state);\n\tset_bit(__LINK_STATE_START, &dev->state);\n\treturn 0;\n}/s' "$f"
 	done
 	note "init_dummy_netdev 就地初始化: $DMY 文件"
+
+	# warp 的 platform_driver.remove 仍是 int；6.11 起必须返回 void
+	# （GCC 14 下是 -Wincompatible-pointer-types 错误）。
+	for f in "$MTK_DRV/warp/src/warp_main.c" \
+		"$MTK_DRV/mt_wifi7/src/warp_driver/warp/warp_main.c" \
+		"$MTK_DRV/mt_hwifi/src/warp_driver/warp/warp_main.c"; do
+		[ -f "$f" ] || continue
+		perl -0777 -pi -e 's/static int\nwarp_remove\(struct platform_device \*pdev\)/static void\nwarp_remove(struct platform_device *pdev)/' "$f"
+		sed -i -E '/^warp_remove\(struct platform_device \*pdev\)$/,/^}$/ { s/^([[:space:]]*)return -1;[[:space:]]*$/\1return;/; s/^([[:space:]]*)return 0;[[:space:]]*$/\1return;/ }' "$f"
+		grep -A1 '^static void$' "$f" | grep -q '^warp_remove' \
+			|| die "warp_remove 未改成 void: ${f#"$WRT_DIR"/}"
+	done
+	note "warp_remove → void（6.18 platform_driver.remove）"
 
 	# 归一化未命中就立即失败，避免把问题拖到 2h 后的编译阶段。
 	# strlcpy 用词边界排除 nla_strlcpy（后者单独替换为 nla_strscpy）。
