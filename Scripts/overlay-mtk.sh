@@ -178,6 +178,15 @@ build_dep "$MTK_DRV/mt_wifi/Makefile"  "warp conninfra"
 build_dep "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_cmn"
 build_dep "$MTK_DRV/mt_hwifi/Makefile" "mt_wifi7 mt_wifi_cmn warp"
 
+# legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到；以包补丁形式
+# 补在 chasey patches-7673（001..041）之后：trace.h 时间 API + 关闭 -Werror。
+MW_PATCHES="$MTK_DRV/mt_wifi/patches-7673"
+if [ -d "$MW_PATCHES" ]; then
+	cp -f "$GITHUB_WORKSPACE/port/mtwifipatches/050-6.18-api.patch" "$MW_PATCHES/" \
+		|| die "mt_wifi 050 补丁装载失败"
+	note "mt_wifi：装载 patches-7673/050-6.18-api.patch"
+fi
+
 # ---------------------------------------------------------------------------
 # [2b] 6.18 内核 API 机械归一化（只做语义等价替换，不动控制流）
 #
