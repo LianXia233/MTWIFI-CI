@@ -209,31 +209,51 @@ extmod_subdirs() {
 extmod_subdirs "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_ap"
 extmod_subdirs "$MTK_DRV/mt_hwifi/Makefile" "wlan_hwifi"
 
-# collect_module_symvers 还会用 grep -F $(PKG_BUILD_DIR) 过滤子目录 symvers。
-# CI 的 build_dir 与 PKG_BUILD_DIR 常因符号链接/相对路径不一致，过滤后得到空
-# 文件；仅靠 PKG_EXTMOD_SUBDIRS 不够。这里在 collect 之后（KernelPackage 把该
-# hook 加在 Hooks/Compile/Post 里）直接用原始 Module.symvers 覆盖，
-# 保证 mt_hwifi/connac_if 的 KBUILD_EXTRA_SYMBOLS 拿到真实符号表。
+# OpenWrt 的 collect_module_symvers 对 external kbuild 有路径假设：
+#   grep -F $(PKG_BUILD_DIR) mt_wifi_ap/Module.symvers
+# 但 kbuild 写进 symvers 的是相对路径（mt_wifi_ap/xxx.o），这段过滤必然为空；
+# 第三段又拿绝对路径的 modules.order 去匹配相对路径，结果仍是空。最终
+# symvers/mt_wifi7.symvers 为空，mt_hwifi/connac_if modpost 找不到 mtk_mac_*。
+# KernelPackage 把 collect_module_symvers 放进 Hooks/Compile/Post 且按名字调用，
+# 所以这里直接覆盖该函数为“复制原始 symvers”，不再依赖它的路径过滤。
 MW7_MK="$MTK_DRV/mt_wifi7/Makefile"
 if [ "$MTK_STACK" = wifi7 ] && [ -f "$MW7_MK" ]; then
-	if ! grep -q 'mt_wifi7_symvers_fix' "$MW7_MK"; then
+	if ! grep -q 'mt_wifi7: symvers raw=' "$MW7_MK"; then
 		cat >> "$MW7_MK" <<'EOF'
 
-# 6.18 移植：collect_module_symvers 在 CI 上会生成空文件（见 overlay-mtk.sh）。
-# 直接复制子目录里 kbuild 产出的完整符号表，覆盖 collect 的结果。
-define mt_wifi7_symvers_fix
+# 6.18 移植：覆盖 collect_module_symvers（见 overlay-mtk.sh）。
+# kbuild 在 mt_wifi_ap/ 生成的 Module.symvers 已是完整符号表，直接搬过去。
+define collect_module_symvers
+	@echo "[mt_wifi7] symvers raw=$$(wc -l < $(PKG_BUILD_DIR)/mt_wifi_ap/Module.symvers 2>/dev/null || echo 0) mtk_mac=$$(grep -cE 'mtk_mac|is_amsdu_capable' $(PKG_BUILD_DIR)/mt_wifi_ap/Module.symvers 2>/dev/null || true)"
 	mkdir -p "$(PKG_SYMVERS_DIR)"
-	f="$(PKG_BUILD_DIR)/mt_wifi_ap/Module.symvers"; \
-	[ -s "$$f" ] || f="$(PKG_BUILD_DIR)/Module.symvers"; \
-	[ -s "$$f" ] || { echo "mt_wifi7: 找不到非空 Module.symvers"; exit 1; }; \
-	cp -f "$$f" "$(PKG_SYMVERS_DIR)/$(PKG_NAME).symvers"
+	cp -f "$(PKG_BUILD_DIR)/mt_wifi_ap/Module.symvers" "$(PKG_SYMVERS_DIR)/$(PKG_NAME).symvers"
+	@echo "[mt_wifi7] symvers dest=$$(wc -l < $(PKG_SYMVERS_DIR)/$(PKG_NAME).symvers)"
 endef
-Hooks/Compile/Post += mt_wifi7_symvers_fix
 EOF
 	fi
-	grep -q 'Hooks/Compile/Post += mt_wifi7_symvers_fix' "$MW7_MK" \
-		|| { echo "overlay: mt_wifi7 symvers hook 注入失败" >&2; exit 1; }
-	note "symvers 覆盖钩子：${MW7_MK#"$WRT_DIR"/}"
+	grep -q 'define collect_module_symvers' "$MW7_MK" \
+		|| { echo "overlay: mt_wifi7 collect 覆盖注入失败" >&2; exit 1; }
+	note "symvers 收集覆盖：${MW7_MK#"$WRT_DIR"/}"
+fi
+
+# modpost 之前打印 mt_wifi7.symvers 的真实状态，便于区分“文件为空”和
+# “符号存在但 modpost 仍不认”。
+MWH_MK="$MTK_DRV/mt_hwifi/Makefile"
+if [ "$MTK_STACK" = wifi7 ] && [ -f "$MWH_MK" ]; then
+	if ! grep -q 'mt_hwifi] mt_wifi7.symvers=' "$MWH_MK"; then
+		cat >> "$MWH_MK" <<'EOF'
+
+# 6.18 移植：modpost 前探测 mt_wifi7 符号表。
+define mt_hwifi_symvers_probe
+	@f="$(PKG_SYMVERS_DIR)/mt_wifi7.symvers"; \
+	 echo "[mt_hwifi] mt_wifi7.symvers=$$(wc -l < "$$f" 2>/dev/null || echo missing) lines"; \
+	 grep -m4 -E 'mtk_mac_alloc_hw|mtk_mac_rx|is_amsdu_capable' "$$f" 2>/dev/null \
+	  || echo "[mt_hwifi] mt_wifi7.symvers 缺少 mtk_mac_*/is_amsdu_capable"
+endef
+Hooks/Compile/Pre += mt_hwifi_symvers_probe
+EOF
+	fi
+	note "symvers 探测：${MWH_MK#"$WRT_DIR"/}"
 fi
 
 # legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到。这里不用
