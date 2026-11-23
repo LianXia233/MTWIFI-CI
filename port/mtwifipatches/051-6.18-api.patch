@@ -85,3 +85,27 @@ SPDX-License-Identifier: MIT
  	return;
  err_free_sk_buff:
  	RELEASE_NDIS_PACKET(NULL, pRxPacket, NDIS_STATUS_FAILURE);
+--- a/mt_wifi/os/linux/rt_linux.c
++++ b/mt_wifi/os/linux/rt_linux.c
+@@ -40,6 +40,9 @@
+ #include <linux/oom.h>
+ #include <linux/netdevice.h>
+ #include <linux/mm.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++#include <linux/sched/signal.h>
++#endif
+ #include <linux/preempt.h>
+ #include <net/sch_generic.h>
+ #include "rt_os_net.h"
+@@ -4929,7 +4932,11 @@
+ 
+ INT32 RtmpThreadPidKill(RTMP_OS_PID PID)
+ {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)
++	return kill_pid(find_vpid(PID), SIGTERM, 1);
++#else
+ 	return KILL_THREAD_PID(PID, SIGTERM, 1);
++#endif
+ }
+ 
+ 
