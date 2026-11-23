@@ -163,37 +163,4 @@ if "linux/sched/signal.h" not in rl:
                     "#include <linux/sched/signal.h>\n"
                     "#endif\n", 1)
 
-old_kill = ("INT32 RtmpThreadPidKill(RTMP_OS_PID PID)\n"
-            "{\n"
-            "\treturn KILL_THREAD_PID(PID, SIGTERM, 1);\n"
-            "}\n")
-new_kill = ("INT32 RtmpThreadPidKill(RTMP_OS_PID PID)\n"
-            "{\n"
-            "#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)\n"
-            "\treturn kill_pid(find_vpid(PID), SIGTERM, 1);\n"
-            "#else\n"
-            "\treturn KILL_THREAD_PID(PID, SIGTERM, 1);\n"
-            "#endif\n"
-            "}\n")
-if old_kill in rl:
-    rl = rl.replace(old_kill, new_kill, 1)
-must("del_timer_sync(" not in rl, "rt_linux.c 仍有 del_timer_sync")
-write("mt_wifi/os/linux/rt_linux.c", rl)
-
-# 任何残留的 KILL_THREAD_PID 调用都走 6.18 分支，避免 kill_proc 隐式声明
-rh = read("mt_wifi/include/os/rt_linux.h")
-if rh is not None and "kill_proc((_A), (_B), (_C))" in rh:
-    old = "#define KILL_THREAD_PID(_A, _B, _C)\tkill_proc((_A), (_B), (_C))"
-    new = ("#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 18, 0)\n"
-           "#define KILL_THREAD_PID(_A, _B, _C)\tkill_pid(find_vpid(_A), (_B), (_C))\n"
-           "#else\n" + old + "\n#endif")
-    # 制表符可能被空格替代，做一次宽松替换
-    if old not in rh:
-        import re
-        rh = re.sub(r"#define KILL_THREAD_PID\(_A, _B, _C\)[ \t]*kill_proc\(\(_A\), \(_B\), \(_C\)\)",
-                    new, rh, count=1)
-    else:
-        rh = rh.replace(old, new, 1)
-    write("mt_wifi/include/os/rt_linux.h", rh)
-
 print("mtwifi-postprepare: 6.18 适配完成")
