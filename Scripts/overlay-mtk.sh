@@ -185,23 +185,19 @@ build_dep "$MTK_DRV/mt_hwifi/Makefile" "mt_wifi7 mt_wifi_cmn warp"
 # legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到。这里不用
 # patches-7673 追加补丁：该包的 Makefile/config.mk 在 OpenWrt prepare 流程里
 # 会按不同上下文被改写，追加补丁在 CI 上出现过 hunk 全失配（本地同 tarball
-# +41 补丁却能应用）。改为 Hooks/Prepare/Post 调用幂等脚本，解包+chasey
-# 补丁之后再改 trace.h/时间 API、-Werror、KTHREAD、hif_pci page_frag 等。
+# +41 补丁却能应用）。改为在 Build/Compile 的 make 之前调用幂等脚本；脚本
+# 在解包+chasey 补丁之后改 trace.h/时间 API、-Werror、KTHREAD、page_frag、
+# from_timer、EXTRA_CFLAGS→ccflags-y 等。
+# 注意不能用 Hooks/Prepare/Post：该包在 CI 上没有执行到 hook（prepare 阶段
+# 未出现脚本输出），直接用 Build/Compile 注入可以保证在编译前落地。
 MW_MK="$MTK_DRV/mt_wifi/Makefile"
 if [ "$MTK_STACK" = legacy ] && [ -f "$MW_MK" ]; then
-	if ! grep -q 'mt_wifi_6_18_postprepare' "$MW_MK"; then
-		cat >> "$MW_MK" <<EOF
-
-# 6.18 适配（tarball 解包并应用 patches-7673 之后执行，脚本幂等）
-define mt_wifi_6_18_postprepare
-	python3 "$GITHUB_WORKSPACE/port/mtwifi-postprepare.py" "\$(PKG_BUILD_DIR)"
-endef
-Hooks/Prepare/Post += mt_wifi_6_18_postprepare
-EOF
+	if ! grep -q 'mtwifi-postprepare.py' "$MW_MK"; then
+		perl -0777 -pi -e 's|define Build/Compile\n\t\+?\$\(MAKE\)|define Build/Compile\n\tpython3 "'"$GITHUB_WORKSPACE"'/port/mtwifi-postprepare.py" "\$(PKG_BUILD_DIR)"\n\t\$(MAKE)|' "$MW_MK"
 	fi
-	grep -q 'mt_wifi_6_18_postprepare' "$MW_MK" \
-		|| die "mt_wifi post-prepare hook 注入失败"
-	note "mt_wifi：Hooks/Prepare/Post → port/mtwifi-postprepare.py"
+	grep -q 'mtwifi-postprepare.py' "$MW_MK" \
+		|| die "mt_wifi Build/Compile 脚本注入失败"
+	note "mt_wifi：Build/Compile → port/mtwifi-postprepare.py"
 fi
 
 # legacy warp 同样是 tarball 源码（warp_20250408），且 V2/V3 会编译
