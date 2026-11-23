@@ -173,4 +173,16 @@ if "linux/sched/signal.h" not in rl:
                     "#include <linux/sched/signal.h>\n"
                     "#endif\n", 1)
 
+must("del_timer_sync(" not in rl, "rt_linux.c 仍有 del_timer_sync")
+write("mt_wifi/os/linux/rt_linux.c", rl)
+
+# 6.15 起 from_timer() 改名 timer_container_of()
+tm = read("mt_wifi/embedded/include/rtmp_timer.h")
+if tm is not None:
+    if "from_timer(" in tm:
+        tm = tm.replace("from_timer(", "timer_container_of(")
+        write("mt_wifi/embedded/include/rtmp_timer.h", tm)
+    must("from_timer(" not in read("mt_wifi/embedded/include/rtmp_timer.h"),
+         "rtmp_timer.h 仍有 from_timer")
+
 print("mtwifi-postprepare: 6.18 适配完成")

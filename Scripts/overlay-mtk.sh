@@ -247,6 +247,7 @@ if [ -d "$MTK_DRV" ]; then
 	PDM=$(grep -rl 'pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	GOC=$(grep -rlE '(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	DTM=$(grep -rlE '(^|[^[:alnum:]_])del_timer(_sync)?\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	FTM=$(grep -rlF 'from_timer(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	grep -rlE 'strlcpy\(|nla_strlcpy\(|rtc_time_to_tm\(|netif_rx_ni\(|pci_set_dma_mask\(|pci_set_consistent_dma_mask\(|(^|[^[:alnum:]_])get_online_cpus\(|(^|[^[:alnum:]_])del_timer(_sync)?\(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null |
 		xargs -r sed -i \
@@ -260,7 +261,12 @@ if [ -d "$MTK_DRV" ]; then
 			-e 's/\bdel_timer(/timer_delete(/g' \
 			-e 's/pci_set_dma_mask(pdev, /dma_set_mask(\&pdev->dev, /g' \
 			-e 's/pci_set_consistent_dma_mask(pdev, /dma_set_coherent_mask(\&pdev->dev, /g'
-	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | del_timer(_sync)→timer_delete(_sync): $DTM | pci_set_dma_mask→dma_set_mask: $PDM 文件"
+	# from_timer() 在 6.15 改名 timer_container_of()
+	if [ "$FTM" -gt 0 ]; then
+		grep -rlF 'from_timer(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null |
+			xargs -r sed -i 's/\bfrom_timer(/timer_container_of(/g'
+	fi
+	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | del_timer(_sync)→timer_delete(_sync): $DTM | from_timer→timer_container_of: $FTM | pci_set_dma_mask→dma_set_mask: $PDM 文件"
 
 	# 6.12 起 asm/unaligned.h 并入 linux/unaligned.h（arm64 不再提供前者）
 	UNA=$(grep -rl '#include <asm/unaligned.h>' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
@@ -375,6 +381,8 @@ if [ -d "$MTK_DRV" ]; then
 	n=$(grep -rl '#include <asm/unaligned.h>' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	[ "$n" -eq 0 ] || die "API 归一化未覆盖: asm/unaligned.h（$n 文件）"
+	n=$(grep -rlF 'from_timer(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	[ "$n" -eq 0 ] || die "API 归一化未覆盖: from_timer(（$n 文件）"
 	TRACE_LEFT=$(find "$MTK_DRV" -path '*/include/os/trace.h' -type f \
 		-exec grep -l 'do_gettimeofday(&time);' {} + 2>/dev/null | wc -l)
 	[ "$TRACE_LEFT" -eq 0 ] || die "trace.h 时间戳归一化未覆盖（$TRACE_LEFT 文件）"
