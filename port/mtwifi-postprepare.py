@@ -67,6 +67,16 @@ if "Wno-error=incompatible-pointer-types" not in mk:
     mk = mk.rstrip("\n") + "\n\n" + gcc14
     write("mt_wifi_ap/Makefile", mk)
 
+# 6.15 起 kbuild 移除了 EXTRA_CFLAGS 兼容层（scripts/Makefile.lib 不再
+# ccflags-y += $(EXTRA_CFLAGS)），而本源码所有功能宏都在 EXTRA_CFLAGS 里。
+# 显式并回 ccflags-y，等价于 6.14 及更早的行为。
+mk = read("mt_wifi_ap/Makefile")
+if "ccflags-y += $(EXTRA_CFLAGS)" not in mk:
+    mk = mk.rstrip("\n") + "\n\nccflags-y += $(EXTRA_CFLAGS)\n"
+    write("mt_wifi_ap/Makefile", mk)
+must("ccflags-y += $(EXTRA_CFLAGS)" in read("mt_wifi_ap/Makefile"),
+     "EXTRA_CFLAGS 未并回 ccflags-y")
+
 anchor = ("ifeq ($(CONFIG_KTHREAD),y)\n"
           "    EXTRA_CFLAGS += -DKTHREAD_SUPPORT\n"
           "endif\n")
