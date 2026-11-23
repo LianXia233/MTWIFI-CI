@@ -163,7 +163,7 @@ fi
 # 保留其余 HNAT/BBR/nft 依赖。
 TURBO_MK="$WRT_DIR/package/mtk/applications/luci-app-turboacc-mtk/Makefile"
 if [ -f "$TURBO_MK" ]; then
-	sed -i 's/ +kmod-ipt-fullconenat//' "$TURBO_MK"
+	sed -i 's/+kmod-ipt-fullconenat//' "$TURBO_MK"
 	grep -q 'kmod-ipt-fullconenat' "$TURBO_MK" \
 		&& die "turboacc-mtk 仍依赖不存在的 kmod-ipt-fullconenat"
 	note "turboacc-mtk：移除 kmod-ipt-fullconenat（6.18 用 kmod-nft-fullcone）"
