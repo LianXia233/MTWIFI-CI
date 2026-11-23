@@ -194,6 +194,21 @@ build_dep "$MTK_DRV/mt_wifi/Makefile"  "warp conninfra"
 build_dep "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_cmn"
 build_dep "$MTK_DRV/mt_hwifi/Makefile" "mt_wifi7 mt_wifi_cmn warp"
 
+# OpenWrt 的 collect_module_symvers 只在 PKG_EXTMOD_SUBDIRS（默认 .）下找
+# Module.symvers 和 modules.order。mt_wifi7 的模块实际在 mt_wifi_ap/ 下，
+# root 只有一份 cp 过来的 symvers、没有 modules.order，collect 会产出空
+# 文件，导致 mt_hwifi/connac_if 的 modpost 报 mtk_mac_*/is_amsdu_capable
+# undefined。显式把收集目录指到子目录。
+extmod_subdirs() {
+	local mk="$1" sub="$2"
+	[ -f "$mk" ] || return 0
+	grep -q '^PKG_EXTMOD_SUBDIRS' "$mk" \
+		|| echo "PKG_EXTMOD_SUBDIRS:=$sub" >> "$mk"
+	note "PKG_EXTMOD_SUBDIRS=$sub: ${mk#"$WRT_DIR"/}"
+}
+extmod_subdirs "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_ap"
+extmod_subdirs "$MTK_DRV/mt_hwifi/Makefile" "wlan_hwifi"
+
 # legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到。这里不用
 # patches-7673 追加补丁：该包的 Makefile/config.mk 在 OpenWrt prepare 流程里
 # 会按不同上下文被改写，追加补丁在 CI 上出现过 hunk 全失配（本地同 tarball

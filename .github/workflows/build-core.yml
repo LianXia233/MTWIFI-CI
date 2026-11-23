@@ -268,14 +268,16 @@ jobs:
         run: |
           cd wrt && mkdir -p upload
           cp -f .config "upload/Config-$WRT_CONFIG-$WRT_DATE.txt"
-          find bin/targets -iregex '.*\(buildinfo\|json\|sha256sums\|packages\|manifest\)' -delete
-          for file in $(find bin/targets -type f -iname "*$WRT_TARGET*"); do
+          find bin/targets -type f -iregex '.*\(buildinfo\|json\|sha256sums\|packages\|manifest\)' -delete
+          # apk 基座下 packages 是目录（opkg 时代是索引文件）；只收固件镜像，
+          # 不把整目录 .apk 搬进 upload 根目录，否则会污染 Release。
+          for file in $(find bin/targets -type f -not -path '*/packages/*' -iname "*$WRT_TARGET*"); do
             base=$(basename "$file")
             ext=${base#*.}
             stem=$(basename "${base%%.*}" | grep -io "$WRT_TARGET.*")
             mv -f "$file" "upload/$stem-$WRT_CONFIG-$WRT_DATE.$ext"
           done
-          find bin/targets -type f -exec mv -f {} upload/ \;
+          find bin/targets -type f -not -path '*/packages/*' -exec mv -f {} upload/ \;
           make clean -j"$(nproc)" >/dev/null 2>&1 || true
 
       - name: 发布 Release
