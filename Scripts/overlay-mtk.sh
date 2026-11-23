@@ -209,6 +209,33 @@ extmod_subdirs() {
 extmod_subdirs "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_ap"
 extmod_subdirs "$MTK_DRV/mt_hwifi/Makefile" "wlan_hwifi"
 
+# collect_module_symvers 还会用 grep -F $(PKG_BUILD_DIR) 过滤子目录 symvers。
+# CI 的 build_dir 与 PKG_BUILD_DIR 常因符号链接/相对路径不一致，过滤后得到空
+# 文件；仅靠 PKG_EXTMOD_SUBDIRS 不够。这里在 collect 之后（KernelPackage 把该
+# hook 加在 Hooks/Compile/Post 里）直接用原始 Module.symvers 覆盖，
+# 保证 mt_hwifi/connac_if 的 KBUILD_EXTRA_SYMBOLS 拿到真实符号表。
+MW7_MK="$MTK_DRV/mt_wifi7/Makefile"
+if [ "$MTK_STACK" = wifi7 ] && [ -f "$MW7_MK" ]; then
+	if ! grep -q 'mt_wifi7_symvers_fix' "$MW7_MK"; then
+		cat >> "$MW7_MK" <<'EOF'
+
+# 6.18 移植：collect_module_symvers 在 CI 上会生成空文件（见 overlay-mtk.sh）。
+# 直接复制子目录里 kbuild 产出的完整符号表，覆盖 collect 的结果。
+define mt_wifi7_symvers_fix
+	mkdir -p "$(PKG_SYMVERS_DIR)"
+	f="$(PKG_BUILD_DIR)/mt_wifi_ap/Module.symvers"; \
+	[ -s "$$f" ] || f="$(PKG_BUILD_DIR)/Module.symvers"; \
+	[ -s "$$f" ] || { echo "mt_wifi7: 找不到非空 Module.symvers"; exit 1; }; \
+	cp -f "$$f" "$(PKG_SYMVERS_DIR)/$(PKG_NAME).symvers"
+endef
+Hooks/Compile/Post += mt_wifi7_symvers_fix
+EOF
+	fi
+	grep -q 'Hooks/Compile/Post += mt_wifi7_symvers_fix' "$MW7_MK" \
+		|| { echo "overlay: mt_wifi7 symvers hook 注入失败" >&2; exit 1; }
+	note "symvers 覆盖钩子：${MW7_MK#"$WRT_DIR"/}"
+fi
+
 # legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到。这里不用
 # patches-7673 追加补丁：该包的 Makefile/config.mk 在 OpenWrt prepare 流程里
 # 会按不同上下文被改写，追加补丁在 CI 上出现过 hunk 全失配（本地同 tarball

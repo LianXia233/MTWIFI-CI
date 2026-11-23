@@ -55,4 +55,29 @@ sed -i '/^include \.\/ci-prebuilt\.mk$/d; /^$(eval $(call HostBuild))$/i include
 grep -Fxq 'include ./ci-prebuilt.mk' "$RUST_MAKEFILE"
 
 "$RUST_ROOT/bin/rustc" --version | tee -a "$REPORT_DIR/rust-toolchain.txt"
+TARGET_LIBDIR=$("$RUST_ROOT/bin/rustc" --print target-libdir --target "$RUST_TARGET")
+printf 'target-libdir: %s\n' "$TARGET_LIBDIR" | tee -a "$REPORT_DIR/rust-toolchain.txt"
+test -d "$TARGET_LIBDIR"
+
+# cargo 默认从 PATH 找 rustc；CI 里 staging_dir/host* 会被缓存恢复覆盖，符号链接
+# 可能指向旧工具链，cargo 因此找不到 rustup target add 刚装进当前 sysroot 的
+# target std（E0463: can't find crate for `core`）。把包内 cargo/rustc 固定到
+# 本次引导的 sysroot，绕开 PATH 与缓存的不确定性。
+MT5700_MK="$PWD/package/luci-app-mt5700/src/Makefile"
+if [ -f "$MT5700_MK" ]; then
+	python3 - "$MT5700_MK" "$RUST_ROOT" <<'PY'
+import re, sys
+path, root = sys.argv[1], sys.argv[2]
+s = open(path, encoding="utf-8").read()
+pat = re.compile(r"(?m)^\t\tcargo build ")
+if not pat.search(s):
+    raise SystemExit("[rust] mt5700 src/Makefile 未找到 cargo build 行")
+line = (f'\t\tRUSTC="{root}/bin/rustc" RUSTDOC="{root}/bin/rustdoc" '
+        f'"{root}/bin/cargo" build ')
+s, n = pat.subn(line, s, count=1)
+open(path, "w", encoding="utf-8", newline="").write(s)
+print(f"[rust] mt5700: cargo/rustc 固定到 {root}（替换 {n} 处）")
+PY
+fi
+
 echo "[rust] 已接入 runner 工具链：$RUST_TOOLCHAIN -> $RUST_TARGET"
