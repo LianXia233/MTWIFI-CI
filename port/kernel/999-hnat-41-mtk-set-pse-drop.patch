@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT
+# 6.18 移植：为 mt_wifi 提供 mtk_set_pse_drop() 导出符号
+#
+# pdn 的 mt_wifi7（WHNAT_SUPPORT 且非 CONFIG_CPE_SUPPORT）调用
+# mtk_set_pse_drop(u32)；该符号原本由 chasey 999-eth-93 的 mtk_eth_reset.c
+# 提供，6.18 树没有这个文件，mt_wifi.ko modpost 报 undefined。
+# 这里在 mtk_eth_soc 里补空实现：PSE_PPE_DROP 偏移随 NETSYS 代际变化，
+# 且移植层尚未维护 g_eth；SER 场景只是丢流优化，不影响建链/转发主路径。
+#
+--- a/drivers/net/ethernet/mediatek/mtk_eth_soc.c
++++ b/drivers/net/ethernet/mediatek/mtk_eth_soc.c
+@@ -5684,6 +5684,19 @@
+ 	},
+ };
+ 
++#if defined(CONFIG_NET_MEDIATEK_HNAT) || defined(CONFIG_NET_MEDIATEK_HNAT_MODULE)
++/*
++ * mt_wifi 在 WHNAT 模式下用于在 SER 期间设置 PSE drop 位。
++ * 6.18 端口先提供空实现：PSE_PPE_DROP 布局随 NETSYS 代际变化，
++ * 且本移植层尚未维护 g_eth，空实现不影响建链/转发主路径。
++ */
++void mtk_set_pse_drop(u32 config)
++{
++	(void)config;
++}
++EXPORT_SYMBOL(mtk_set_pse_drop);
++#endif
++
+ module_platform_driver(mtk_driver);
+ 
+ MODULE_LICENSE("GPL");

@@ -157,6 +157,18 @@ if [ -d "$SRC_DIR/chasey/package/mtk/applications/datconf" ]; then
 	note "datconf：使用 chasey 版本（PKG_SOURCE_URL/HASH + ucode-mod-datconf）"
 fi
 
+# turboacc-mtk 依赖 kmod-ipt-fullconenat（iptables 版 fullcone），但 6.18 基座
+# 只保留 nft 版 fullcone（common.txt 已选 kmod-nft-fullcone），该包不存在，
+# rootfs 安装阶段报 "kmod-ipt-fullconenat (no such package)"。移除这一条失效依赖，
+# 保留其余 HNAT/BBR/nft 依赖。
+TURBO_MK="$WRT_DIR/package/mtk/applications/luci-app-turboacc-mtk/Makefile"
+if [ -f "$TURBO_MK" ]; then
+	sed -i 's/ +kmod-ipt-fullconenat//' "$TURBO_MK"
+	grep -q 'kmod-ipt-fullconenat' "$TURBO_MK" \
+		&& die "turboacc-mtk 仍依赖不存在的 kmod-ipt-fullconenat"
+	note "turboacc-mtk：移除 kmod-ipt-fullconenat（6.18 用 kmod-nft-fullcone）"
+fi
+
 # 跨源码包的符号依赖：kmod 的 DEPENDS 只保证运行时顺序，编译期 symvers
 # 需要 PKG_BUILD_DEPENDS 才会生成正确的 build 依赖边。parallel 构建里
 # 否则会出现“先编调用方、后编符号提供者” → modpost undefined。
