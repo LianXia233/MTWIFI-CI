@@ -97,6 +97,15 @@ SPDX-License-Identifier: MIT
  #include <linux/preempt.h>
  #include <net/sch_generic.h>
  #include "rt_os_net.h"
+@@ -380,7 +383,7 @@
+ 	OUT BOOLEAN *pCancelled)
+ {
+ 	if (timer_pending(pTimer))
+-		*pCancelled = del_timer_sync(pTimer);
++		*pCancelled = timer_delete_sync(pTimer);
+ 	else
+ 		*pCancelled = TRUE;
+ }
 @@ -4929,7 +4932,11 @@
  
  INT32 RtmpThreadPidKill(RTMP_OS_PID PID)

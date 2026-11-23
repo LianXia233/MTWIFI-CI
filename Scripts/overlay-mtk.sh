@@ -236,7 +236,8 @@ if [ -d "$MTK_DRV" ]; then
 	NRN=$(grep -rl 'netif_rx_ni(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	PDM=$(grep -rl 'pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	GOC=$(grep -rlE '(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
-	grep -rlE 'strlcpy\(|nla_strlcpy\(|rtc_time_to_tm\(|netif_rx_ni\(|pci_set_dma_mask\(|pci_set_consistent_dma_mask\(|(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" \
+	DTM=$(grep -rlE '(^|[^[:alnum:]_])del_timer(_sync)?\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	grep -rlE 'strlcpy\(|nla_strlcpy\(|rtc_time_to_tm\(|netif_rx_ni\(|pci_set_dma_mask\(|pci_set_consistent_dma_mask\(|(^|[^[:alnum:]_])get_online_cpus\(|(^|[^[:alnum:]_])del_timer(_sync)?\(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null |
 		xargs -r sed -i \
 			-e 's/\bstrlcpy(/strscpy(/g' \
@@ -245,9 +246,11 @@ if [ -d "$MTK_DRV" ]; then
 			-e 's/\bnetif_rx_ni(/netif_rx(/g' \
 			-e 's/\bget_online_cpus(/cpus_read_lock(/g' \
 			-e 's/\bput_online_cpus(/cpus_read_unlock(/g' \
+			-e 's/\bdel_timer_sync(/timer_delete_sync(/g' \
+			-e 's/\bdel_timer(/timer_delete(/g' \
 			-e 's/pci_set_dma_mask(pdev, /dma_set_mask(\&pdev->dev, /g' \
 			-e 's/pci_set_consistent_dma_mask(pdev, /dma_set_coherent_mask(\&pdev->dev, /g'
-	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | pci_set_dma_mask→dma_set_mask: $PDM 文件"
+	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | del_timer(_sync)→timer_delete(_sync): $DTM | pci_set_dma_mask→dma_set_mask: $PDM 文件"
 
 	find "$MTK_DRV" -path '*/include/os/trace.h' -type f -print0 |
 	while IFS= read -r -d '' trace_h; do
@@ -348,6 +351,9 @@ if [ -d "$MTK_DRV" ]; then
 	n=$(grep -rlE '(^|[^[:alnum:]_])(get|put)_online_cpus\(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	[ "$n" -eq 0 ] || die "API 归一化未覆盖: get/put_online_cpus(（$n 文件）"
+	n=$(grep -rlE '(^|[^[:alnum:]_])del_timer(_sync)?\(' "$MTK_DRV" \
+		--include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	[ "$n" -eq 0 ] || die "API 归一化未覆盖: del_timer(_sync)(（$n 文件）"
 	TRACE_LEFT=$(find "$MTK_DRV" -path '*/include/os/trace.h' -type f \
 		-exec grep -l 'do_gettimeofday(&time);' {} + 2>/dev/null | wc -l)
 	[ "$TRACE_LEFT" -eq 0 ] || die "trace.h 时间戳归一化未覆盖（$TRACE_LEFT 文件）"
