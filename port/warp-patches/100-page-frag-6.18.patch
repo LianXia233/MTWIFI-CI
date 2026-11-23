@@ -51,6 +51,15 @@
  	struct sw_conf_t *sw_conf = wed->sw_conf;
  
  	if (!res->des_buf.alloc_va)
+@@ -269,7 +276,7 @@
+ 
+ #ifdef WED_DYNAMIC_TXBM_SUPPORT
+ 	if (sw_conf->txbm.enable)
+-		del_timer(&res->bm2high_monitor);
++		timer_delete(&res->bm2high_monitor);
+ 
+ 	list_for_each_safe(cur, next, &res->budget_head) {
+ 		struct wed_bm_group_info *grp = list_entry(cur, struct wed_bm_group_info, list);
 @@ -283,11 +290,16 @@
  	}
  #endif	/* WED_DYNAMIC_TXBM_SUPPORT */

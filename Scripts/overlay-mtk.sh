@@ -236,7 +236,7 @@ if [ -d "$MTK_DRV" ]; then
 	NRN=$(grep -rl 'netif_rx_ni(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	PDM=$(grep -rl 'pci_set_dma_mask(\|pci_set_consistent_dma_mask(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	GOC=$(grep -rlE '(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
-	grep -rlE 'strlcpy(\|nla_strlcpy(\|rtc_time_to_tm(\|netif_rx_ni(\|pci_set_dma_mask(\|pci_set_consistent_dma_mask(\|(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" \
+	grep -rlE 'strlcpy\(|nla_strlcpy\(|rtc_time_to_tm\(|netif_rx_ni\(|pci_set_dma_mask\(|pci_set_consistent_dma_mask\(|(^|[^[:alnum:]_])get_online_cpus\(' "$MTK_DRV" \
 		--include='*.c' --include='*.h' 2>/dev/null |
 		xargs -r sed -i \
 			-e 's/\bstrlcpy(/strscpy(/g' \
