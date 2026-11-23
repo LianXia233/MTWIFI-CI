@@ -182,16 +182,26 @@ build_dep "$MTK_DRV/mt_wifi/Makefile"  "warp conninfra"
 build_dep "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_cmn"
 build_dep "$MTK_DRV/mt_hwifi/Makefile" "mt_wifi7 mt_wifi_cmn warp"
 
-# legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到；以包补丁形式
-# 补在 chasey patches-7673（001..041）之后：050 管 trace.h 时间 API + 关闭
-# -Werror，051 管 hif_pci 的 page_frag_cache、KTHREAD 与 netif_rx_ni。
-MW_PATCHES="$MTK_DRV/mt_wifi/patches-7673"
-if [ -d "$MW_PATCHES" ]; then
-	for p in 050-6.18-api.patch 051-6.18-api.patch; do
-		cp -f "$GITHUB_WORKSPACE/port/mtwifipatches/$p" "$MW_PATCHES/" \
-			|| die "mt_wifi $p 补丁装载失败"
-	done
-	note "mt_wifi：装载 patches-7673/050-6.18-api.patch + 051-6.18-api.patch"
+# legacy mt_wifi 是 tarball 源码，overlay 的源码归一化碰不到。这里不用
+# patches-7673 追加补丁：该包的 Makefile/config.mk 在 OpenWrt prepare 流程里
+# 会按不同上下文被改写，追加补丁在 CI 上出现过 hunk 全失配（本地同 tarball
+# +41 补丁却能应用）。改为 Hooks/Prepare/Post 调用幂等脚本，解包+chasey
+# 补丁之后再改 trace.h/时间 API、-Werror、KTHREAD、hif_pci page_frag 等。
+MW_MK="$MTK_DRV/mt_wifi/Makefile"
+if [ "$MTK_STACK" = legacy ] && [ -f "$MW_MK" ]; then
+	if ! grep -q 'mt_wifi_6_18_postprepare' "$MW_MK"; then
+		cat >> "$MW_MK" <<EOF
+
+# 6.18 适配（tarball 解包并应用 patches-7673 之后执行，脚本幂等）
+define mt_wifi_6_18_postprepare
+	python3 "$GITHUB_WORKSPACE/port/mtwifi-postprepare.py" "\$(PKG_BUILD_DIR)"
+endef
+Hooks/Prepare/Post += mt_wifi_6_18_postprepare
+EOF
+	fi
+	grep -q 'mt_wifi_6_18_postprepare' "$MW_MK" \
+		|| die "mt_wifi post-prepare hook 注入失败"
+	note "mt_wifi：Hooks/Prepare/Post → port/mtwifi-postprepare.py"
 fi
 
 # legacy warp 同样是 tarball 源码（warp_20250408），且 V2/V3 会编译
