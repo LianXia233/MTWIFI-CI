@@ -116,7 +116,7 @@ fi
 # ---- 5. 架构与设备名 -----------------------------------------------------
 ARCH=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$WRT/.config" 2>/dev/null | head -n1)
 # opkg 基座是 .ipk，apk 基座是 .apk；两者都接受。
-PKG=$(find "$WRT/bin" \( -name 'kmod-mediatek_hnat_*.ipk' -o -name 'kmod-mediatek_hnat-*.apk' \) 2>/dev/null | head -n1)
+PKG=$(find "$WRT/bin" \( -name 'kmod-mediatek_hnat_*.ipk' -o -name 'kmod-mediatek_hnat*.apk' \) 2>/dev/null | head -n1)
 if [ -n "${PKG:-}" ]; then
 	ok "kmod 包：$(basename "$PKG")"
 	# .ipk 架构在文件名尾部；.apk 的包名不带架构字段，改由 manifest 与
