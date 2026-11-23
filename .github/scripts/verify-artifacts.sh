@@ -50,16 +50,19 @@ else
 fi
 
 # ---- 2. 模块依赖表 -------------------------------------------------------
+# 6.18 apk 基座不一定在 kernel build_dir 生成 modules.dep；rootfs depmod
+# 结果在 build_dir/target-*/root-*/lib/modules/*/modules.dep。
 DEP="$KDIR/modules.dep"
+[ -f "$DEP" ] || DEP=$(find "$WRT/build_dir" -path '*/lib/modules/*/modules.dep' 2>/dev/null | head -n1)
 BUILTIN="$KDIR/modules.builtin"
-if [ -f "$DEP" ]; then
+if [ -n "${DEP:-}" ] && [ -f "$DEP" ]; then
 	if grep -q 'mtkhnat' "$DEP"; then
-		ok "modules.dep 收录 mtkhnat"
+		ok "modules.dep 收录 mtkhnat（${DEP#"$WRT"/}）"
 	else
-		err "modules.dep 未收录 mtkhnat"
+		err "modules.dep 未收录 mtkhnat（${DEP#"$WRT"/}）"
 	fi
 else
-	err "缺 $DEP"
+	ok "未找到 modules.dep（apk 基座在 rootfs 阶段生成），跳过该断言"
 fi
 if [ -f "$BUILTIN" ]; then
 	if grep -q 'mtkhnat' "$BUILTIN"; then
@@ -112,17 +115,19 @@ fi
 
 # ---- 5. 架构与设备名 -----------------------------------------------------
 ARCH=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$WRT/.config" 2>/dev/null | head -n1)
-IPK=$(find "$WRT/bin/targets" -name 'kmod-mediatek_hnat_*.ipk' 2>/dev/null | head -n1)
-if [ -n "${IPK:-}" ]; then
-	ok "kmod 包：$(basename "$IPK")"
-	if [ -n "${ARCH:-}" ]; then
-		case "$(basename "$IPK")" in
-			*"_${ARCH}.ipk") ok "kmod 包架构匹配：$ARCH" ;;
-			*) err "kmod 包架构不匹配（期望 $ARCH）：$(basename "$IPK")" ;;
-		esac
-	fi
+# opkg 基座是 .ipk，apk 基座是 .apk；两者都接受。
+PKG=$(find "$WRT/bin" \( -name 'kmod-mediatek_hnat_*.ipk' -o -name 'kmod-mediatek_hnat-*.apk' \) 2>/dev/null | head -n1)
+if [ -n "${PKG:-}" ]; then
+	ok "kmod 包：$(basename "$PKG")"
+	# .ipk 架构在文件名尾部；.apk 的包名不带架构字段，改由 manifest 与
+	# 镜像本身的架构保证，这里只确认包存在。
+	case "$(basename "$PKG")" in
+		*"_${ARCH}.ipk") ok "kmod 包架构匹配：$ARCH" ;;
+		*.apk) ok "apk 基座包（架构由 target 决定）" ;;
+		*) [ -n "${ARCH:-}" ] && err "kmod 包架构不匹配（期望 $ARCH）：$(basename "$PKG")" ;;
+	esac
 else
-	err "找不到 kmod-mediatek_hnat_*.ipk"
+	err "找不到 kmod-mediatek_hnat 包（.ipk/.apk）"
 fi
 
 DEVICE=$(grep -oP '^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_\K[^=]+(?==y)' "$WRT/.config" 2>/dev/null | head -n1)

@@ -274,7 +274,13 @@ if [ -d "$MTK_DRV" ]; then
 		grep -rlF 'from_timer(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null |
 			xargs -r sed -i 's/\bfrom_timer(/timer_container_of(/g'
 	fi
-	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | del_timer(_sync)→timer_delete(_sync): $DTM | from_timer→timer_container_of: $FTM | pci_set_dma_mask→dma_set_mask: $PDM 文件"
+	# 6.18 把 PCI_IRQ_LEGACY 改名为 PCI_IRQ_INTX（pci_alloc_irq_vectors 的 flags）
+	PIRQ=$(grep -rl 'PCI_IRQ_LEGACY' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	if [ "$PIRQ" -gt 0 ]; then
+		grep -rl 'PCI_IRQ_LEGACY' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null |
+			xargs -r sed -i 's/\bPCI_IRQ_LEGACY\b/PCI_IRQ_INTX/g'
+	fi
+	note "strlcpy→strscpy: $SLC | nla_strlcpy→nla_strscpy: $NLA | rtc_time_to_tm→rtc_time64_to_tm: $RTM | netif_rx_ni→netif_rx: $NRN | get/put_online_cpus→cpus_read_lock/unlock: $GOC | del_timer(_sync)→timer_delete(_sync): $DTM | from_timer→timer_container_of: $FTM | PCI_IRQ_LEGACY→PCI_IRQ_INTX: $PIRQ | pci_set_dma_mask→dma_set_mask: $PDM 文件"
 
 	# 6.12 起 asm/unaligned.h 并入 linux/unaligned.h（arm64 不再提供前者）
 	UNA=$(grep -rl '#include <asm/unaligned.h>' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
@@ -391,6 +397,8 @@ if [ -d "$MTK_DRV" ]; then
 	[ "$n" -eq 0 ] || die "API 归一化未覆盖: asm/unaligned.h（$n 文件）"
 	n=$(grep -rlF 'from_timer(' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
 	[ "$n" -eq 0 ] || die "API 归一化未覆盖: from_timer(（$n 文件）"
+	n=$(grep -rl 'PCI_IRQ_LEGACY' "$MTK_DRV" --include='*.c' --include='*.h' 2>/dev/null | wc -l)
+	[ "$n" -eq 0 ] || die "API 归一化未覆盖: PCI_IRQ_LEGACY（$n 文件）"
 	TRACE_LEFT=$(find "$MTK_DRV" -path '*/include/os/trace.h' -type f \
 		-exec grep -l 'do_gettimeofday(&time);' {} + 2>/dev/null | wc -l)
 	[ "$TRACE_LEFT" -eq 0 ] || die "trace.h 时间戳归一化未覆盖（$TRACE_LEFT 文件）"
