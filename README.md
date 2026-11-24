@@ -12,10 +12,10 @@
     <img src="https://img.shields.io/github/v/release/LianXia233/MTWIFI-CI?color=007ec6&logo=github&label=Release" alt="Latest Release" />
   </a>
   <a href="https://github.com/immortalwrt/immortalwrt">
-    <img src="https://img.shields.io/badge/ImmortalWrt-Snapshot_%40_fd622ba-brightgreen?logo=openwrt&logoColor=white" alt="ImmortalWrt Baseline" />
+    <img src="https://img.shields.io/badge/ImmortalWrt-Snapshot_%40_73bc086-brightgreen?logo=openwrt&logoColor=white" alt="ImmortalWrt Baseline" />
   </a>
   <a href="https://kernel.org">
-    <img src="https://img.shields.io/badge/Kernel-6.18.55_LTS-blue?logo=linux&logoColor=white" alt="Linux Kernel 6.18" />
+    <img src="https://img.shields.io/badge/Kernel-6.18.60_LTS-blue?logo=linux&logoColor=white" alt="Linux Kernel 6.18" />
   </a>
 </p>
 
@@ -62,7 +62,7 @@
 
 **MTWIFI-CI** 是一个面向联发科 Filogic 生态的现代化固件云编译与移植工程。
 
-本项目立足于 **ImmortalWrt 主线快照**（基线锁定 `fd622baa05b8`，Linux 内核 **6.18.55**，LuCI Master 最新前端），通过自研的自动化 **Overlay 移植层** 与细粒度补丁适配体系，将原本仅在 6.6 / 6.12 等旧版 SDK 中存活的 **MTK 闭源无线驱动栈（mtwifi / mt_wifi7）** 与 **全套硬件加速（mtk_hnat + WED/WARP 无线硬件卸载）** 移植至 6.18 现代化内核，让老牌强劲的闭源驱动重焕生机。
+本项目立足于 **ImmortalWrt 主线快照**（基线锁定 `73bc086a62f9`，Linux 内核 **6.18.60**，LuCI Master 最新前端），通过自研的自动化 **Overlay 移植层** 与细粒度补丁适配体系，将原本仅在 6.6 / 6.12 等旧版 SDK 中存活的 **MTK 闭源无线驱动栈（mtwifi / mt_wifi7）** 与 **全套硬件加速（mtk_hnat + WED/WARP 无线硬件卸载）** 移植至 6.18 现代化内核，让老牌强劲的闭源驱动重焕生机。
 
 ### 🌟 核心特色
 
@@ -104,7 +104,7 @@ MTWIFI-CI 采用高度解耦的分层构建流水线，核心逻辑在 [`Scripts
 ```mermaid
 flowchart TD
     A[GitHub Actions: mtwifi.yml 调度] --> B[历史构建与缓存自动维护清理]
-    B --> C[拉取 ImmortalWrt 主线源码<br/>基线锁定 commit: fd622ba / Linux 6.18.55]
+    B --> C[拉取 ImmortalWrt 主线源码<br/>基线锁定 commit: 73bc086 / Linux 6.18.60]
     C --> D[执行 Scripts/overlay-mtk.sh 核心移植层]
     
     subgraph Overlay [移植层核心阶段]
