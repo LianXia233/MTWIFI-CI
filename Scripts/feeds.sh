@@ -112,3 +112,20 @@ if [ -f "$GITHUB_WORKSPACE/Scripts/feeds.private.sh" ]; then
 fi
 
 exit 0
+
+echo "== 与 OpenWRT-CI 自用/FM350 配置对齐的通用插件层 =="
+# partexp（分区扩容）：参考仓库 Config/GENERAL.txt 选中
+pull sirpdboy/luci-app-partexp main "luci-app-partexp"
+
+# VIKINGYFY/packages：只取 gecoosac / wolultra 两个本仓库 feeds 缺失的包，
+# 不整仓落地，避免与 feeds 内同名包（sing-box / miniupnpd / luci-app-upnp）冲突。
+rm -rf ./package/viking-src
+if git clone -q --depth=1 --branch main https://github.com/VIKINGYFY/packages.git ./package/viking-src; then
+	for p in luci-app-gecoosac luci-app-wolultra; do
+		d=$(find ./package/viking-src -maxdepth 3 -type d -name "$p" | head -1)
+		if [ -n "$d" ]; then cp -a "$d" ./package/; echo "[feeds] $p"; else echo "[feeds] WARN: $p 未找到"; fi
+	done
+	rm -rf ./package/viking-src
+else
+	echo "[feeds] WARN: VIKINGYFY/packages 克隆失败，跳过 gecoosac/wolultra"
+fi

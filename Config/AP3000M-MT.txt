@@ -114,6 +114,7 @@ CONFIG_PACKAGE_kmod-tls=y
 # （Makefile PKG_NAME）为 luci-app-airpi-fancontrol；旧写法没有对应
 # Kconfig 符号，会被静默丢弃，导致固件里完全没有风扇控制插件。
 CONFIG_PACKAGE_luci-app-airpi-fancontrol=y
+CONFIG_PACKAGE_kmod-airpi-gpio-fan=y
 CONFIG_PACKAGE_kmod-hwmon-pwmfan=y
 
 # ---- 模组管理 ----

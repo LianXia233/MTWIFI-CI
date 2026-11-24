@@ -134,6 +134,7 @@ jobs:
         run: |
           cd wrt
           cat "$GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt" \
+              "$GITHUB_WORKSPACE/Config/general.txt" \
               "$GITHUB_WORKSPACE/Config/common.txt" >> .config
           if [ -n "$WRT_EXTRA_PACKAGES" ]; then
             printf '%s\n' "$WRT_EXTRA_PACKAGES" >> .config
