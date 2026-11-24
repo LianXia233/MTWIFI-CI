@@ -194,6 +194,42 @@ build_dep "$MTK_DRV/mt_wifi/Makefile"  "warp conninfra"
 build_dep "$MTK_DRV/mt_wifi7/Makefile" "mt_wifi_cmn"
 build_dep "$MTK_DRV/mt_hwifi/Makefile" "mt_wifi7 mt_wifi_cmn warp"
 
+# H5000M 的设备定义来自 ImmortalWrt 主线，DEVICE_PACKAGES 会强制带入 mt76 和
+# 主线 2.5G PHY 固件：
+#   - kmod-mt7996e / kmod-mt7992-23-firmware 属于 mt76 栈，本移植由闭源
+#     mt_wifi7 接管 MT7992，不能再让 mt76 抢同一个 PCI 设备；
+#   - mt7987-2p5g-phy-firmware 与 pdn 的 mt798x-2p5g-phy-firmware-internal
+#     安装同名文件（lib/firmware/mediatek/mt7987/i2p5ge-phy-*.bin），apk 在
+#     rootfs 组装时直接报 overwrite 失败。
+# 只改 hiveton_h5000m 这一个 Device 块，保持其它设备不变。
+trim_h5000m_device_packages() {
+	local mk="$WRT_DIR/target/linux/mediatek/image/filogic.mk"
+	[ -f "$mk" ] || die "缺 target/linux/mediatek/image/filogic.mk"
+	python3 - "$mk" <<'PY'
+import re, sys
+path = sys.argv[1]
+s = open(path, encoding="utf-8").read()
+m = re.search(r"define Device/hiveton_h5000m\n.*?\nendef", s, re.S)
+if not m:
+    raise SystemExit("overlay: filogic.mk 缺 Device/hiveton_h5000m")
+block = m.group(0)
+drop = ("mt7987-2p5g-phy-firmware",
+        "kmod-mt7996e",
+        "kmod-mt7992-23-firmware")
+for pkg in drop:
+    block = re.sub(r"[ \t]+" + re.escape(pkg) + r"(?=\s)", "", block)
+for pkg in drop:
+    if pkg in block:
+        raise SystemExit("overlay: h5000m DEVICE_PACKAGES 仍含 " + pkg)
+open(path, "w", encoding="utf-8", newline="").write(
+    s[:m.start()] + block + s[m.end():])
+print("[overlay]   h5000m DEVICE_PACKAGES 移除 mt76 / 主线 2.5G 固件")
+PY
+}
+if [ "$MTK_STACK" = wifi7 ]; then
+	trim_h5000m_device_packages
+fi
+
 # include/package.mk 的 BuildPackage → Build/CoreTargets 是在
 # $(eval $(call KernelPackage,...)) 里展开的：Hooks/Compile/Pre|Post 和
 # PKG_EXTMOD_SUBDIRS 都会被立刻烘进 recipe，事后再 += / 追加定义完全不生效。
