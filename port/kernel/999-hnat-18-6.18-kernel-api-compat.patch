@@ -1,18 +1,32 @@
 From: MTWIFI-CI port <port@localhost>
 Subject: [PATCH] mtk_hnat: adapt to 6.18 kernel APIs
 
-两处 6.15+ 的内核 API 变更，chasey 6.12 源码直接引用会编译失败：
+三处内核 API 变更，chasey 6.12 源码直接引用会编译失败：
 
 1. del_timer_sync() 在 6.15 改名 timer_delete_sync()（旧名已删除）。
 2. struct nf_conn 的 zone 成员只在 CONFIG_NF_CONNTRACK_ZONES=y 时存在；
    改用 nf_ct_zone() 访问器，两种配置下都能编译。
+3. 6.18.60 起 socket->ops->bind 与 kernel_bind() 的地址参数改为
+   struct sockaddr_unsized *（sockaddr 硬化系列回移）。hnat_roaming_enable()
+   的 kernel_bind() 与 hnat_mcast_netlink_open() 的 sock->ops->bind() 都传
+   (struct sockaddr *)&addr，-Wincompatible-pointer-types 直接报错；改按新
+   形参类型转换，addrlen 仍传 sizeof(addr)，语义不变。
 
-注意：第 2 点保持语义不变，只是把直接成员访问换成等价访问器。
+注意：第 2、3 点保持语义不变，只是改用等价访问器/形参类型。
 ---
 diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
 index e551b60..7227ea0 100755
 --- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
 +++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat.c
+@@ -589,7 +589,7 @@
+ 	addr.nl_pad = 0;
+ 	addr.nl_pid = 65534;
+ 	addr.nl_groups = 1 << (RTNLGRP_NEIGH - 1);
+-	ret = kernel_bind(sock, (struct sockaddr *)&addr, sizeof(addr));
++	ret = kernel_bind(sock, (struct sockaddr_unsized *)&addr, sizeof(addr));
+ 	if (ret < 0)
+ 		goto out;
+ 
 @@ -1865,9 +1865,9 @@ static void hnat_remove(struct platform_device *pdev)
  
  	hnat_deinit_debugfs(hnat_priv);
@@ -29,6 +43,15 @@ diff --git a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c b/drivers/net/e
 index c0b7ece..fd02057 100755
 --- a/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
 +++ b/drivers/net/ethernet/mediatek/mtk_hnat/hnat_mcast.c
+@@ -1176,7 +1176,7 @@
+ 	addr.nl_family = PF_NETLINK;
+ 	addr.nl_pid = 65536; /*fix me:how to get an unique id?*/
+ 	addr.nl_groups = RTMGRP_MDB;
+-	ret = sock->ops->bind(sock, (struct sockaddr *)&addr, sizeof(addr));
++	ret = sock->ops->bind(sock, (struct sockaddr_unsized *)&addr, sizeof(addr));
+ 	if (ret < 0)
+ 		goto out;
+ 
 @@ -1503,7 +1503,7 @@ int hnat_mcast_disable(void)
  		return -EINVAL;
  
