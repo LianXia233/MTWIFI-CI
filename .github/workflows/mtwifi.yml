@@ -2,7 +2,7 @@
 # Copyright (C) 2026 LianXia233
 #
 # MTWIFI-CI 调度器
-# 基线：ImmortalWrt 主线快照（内核 6.18.55，固定 fd622ba）
+# 基线：ImmortalWrt 主线快照（内核 6.18.60，固定 73bc086）
 # 移植层：Scripts/overlay-mtk.sh 将闭源 MTK 驱动（mtwifi / mt_wifi7 + HNAT）
 #         适配叠加到主线之上，6.18 断点在 port/ 内迭代收敛。
 
@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       pin:
-        description: '基线快照 commit（留空 = 内置固定快照 fd622ba）'
+        description: '基线快照 commit（留空 = 内置固定快照 73bc086，内核 6.18.60）'
         required: false
         type: string
       packages:
@@ -63,7 +63,7 @@ jobs:
       config: ${{ matrix.config }}
       base-repo: https://github.com/immortalwrt/immortalwrt.git
       base-ref: master
-      base-pin: ${{ inputs.pin || 'fd622baa05b8adf55970ecfb123f9c3fed0f23a8' }}
+      base-pin: ${{ inputs.pin || '73bc086a62f951d96e5d7404f04c4d73e141cad2' }}
       theme: vantage
       hostname: OWRT
       ssid: OWRT
