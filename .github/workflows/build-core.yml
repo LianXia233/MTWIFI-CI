@@ -210,7 +210,13 @@ jobs:
             if [ "$rebuild_failed" -eq 0 ]; then
               # 失败包在串行下全部通过 = 并行依赖竞态；转 -j1 继续，避免白跑一整轮。
               echo "=== 失败包串行重建全部通过（并行竞态），转 -j1 继续 ===" | tee -a "$LOG/serial.log"
-              make -j1 2>&1 | tee -a "$LOG/serial.log" || exit 1
+              if ! make -j1 2>&1 | tee -a "$LOG/serial.log"; then
+                # target/linux install（image/rootfs 组装）在 V= 下只打印进度，
+                # 失败点会被吞掉；单独用 V=s 重跑该阶段采集真实错误。
+                echo "=== -j1 失败，重跑 target/linux/install V=s 采集断点 ===" | tee -a "$LOG/serial.log"
+                make target/linux/install V=s -j1 2>&1 | tee -a "$LOG/serial.log" || true
+                exit 1
+              fi
               exit 0
             fi
             exit 1
