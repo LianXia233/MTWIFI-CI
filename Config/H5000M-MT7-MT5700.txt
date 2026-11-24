@@ -89,15 +89,33 @@ CONFIG_PACKAGE_kmod-crypto-hw-safexcel=y
 CONFIG_PACKAGE_kmod-cryptodev=y
 CONFIG_PACKAGE_kmod-tls=y
 
-# ---- 模组管理（QModem 作为通用层兜底）----
-CONFIG_PACKAGE_qmodem=y
-CONFIG_PACKAGE_luci-app-qmodem=y
+# ---- 模组管理（自用 MT5700 方案，不启用 QModem）----
+# 参考 H5000M-WIFI-YES-NETMONITOR：MT5700 单包自含后端，QModem 为空闲兜底；
+# 这里显式关闭，避免两套模组管理器同时占用 AT/数据通道。
+CONFIG_PACKAGE_qmodem=n
+CONFIG_PACKAGE_luci-app-qmodem=n
 
 # ---- 本方案专属：MT5700 Rust 套件 ----
 CONFIG_PACKAGE_luci-app-mt5700=y
 CONFIG_PACKAGE_luci-app-h5000m-fancontrol=y
 CONFIG_PACKAGE_luci-app-h5000m-netmode=y
 CONFIG_PACKAGE_kmod-hwmon-pwmfan=y
+
+# ---- 自用插件（复刻 OpenWRT-CI 的 H5000M-WIFI-YES-NETMONITOR）----
+# luci-app-netmonitor：网络延迟/连通性监控（procd + ucode RPC + JS 前端）
+CONFIG_PACKAGE_luci-app-netmonitor=y
+CONFIG_PACKAGE_luci-i18n-netmonitor-zh-cn=y
+CONFIG_PACKAGE_luci-mod-status=y
+CONFIG_PACKAGE_ucode-mod-fs=y
+CONFIG_PACKAGE_ucode-mod-uci=y
+CONFIG_PACKAGE_ucode-mod-ubus=y
+CONFIG_PACKAGE_ucode-mod-uloop=y
+
+# luci-app-taygedo：塔吉多（幻塔/异环）每日自动签到
+# 预编译 aarch64 openwrt 形态二进制由 Scripts/feeds.sh 预取到 dl/，
+# 包内 Build/Prepare 直接复用，不触发 OpenWrt rust/host 源码构建。
+CONFIG_PACKAGE_luci-app-taygedo=y
+CONFIG_PACKAGE_ca-bundle=y
 
 # ---- 按 pdn defconfig/mt7987_mt7992.config 补齐 ----
 # 与官方 defconfig 对齐：符号缺失会让 Kconfig 走默认值，版本/模式/

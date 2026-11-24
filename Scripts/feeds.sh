@@ -48,6 +48,42 @@ pull LianXia233/luci-app-qmodem-generic        main "luci-app-qmodem-generic"
 pull LianXia233/luci-app-chfs                  main "luci-app-chfs"
 pull LianXia233/luci-app-fm350                 main "luci-app-fm350"
 
+# luci-app-taygedo（塔吉多签到）：上游是 monorepo，包在 openwrt/luci-app-taygedo。
+# 只在配置显式选中时导入；Rust 后端用上游 Release 的 aarch64 openwrt 形态预编译
+# 二进制（taygedo-rs-*-openwrt.tar.gz），预取到 dl/，避免在 buildroot 里跑 cargo。
+if [ "${WRT_CONFIG:-}" != "" ] \
+	&& grep -qx 'CONFIG_PACKAGE_luci-app-taygedo=y' \
+		"${GITHUB_WORKSPACE:-.}/Config/$WRT_CONFIG.txt" 2>/dev/null; then
+	echo "[feeds] 导入 luci-app-taygedo（预编译 Rust 后端）"
+	rm -rf ./package/luci-app-taygedo ./.taygedo-src
+	git clone -q --depth=1 --branch main \
+		https://github.com/LianXia233/taygedo-CI.git ./.taygedo-src || {
+		echo "[feeds] ERROR: taygedo-CI 克隆失败" >&2; exit 1; }
+	[ -d ./.taygedo-src/openwrt/luci-app-taygedo ] || {
+		echo "[feeds] ERROR: taygedo-CI 缺少 openwrt/luci-app-taygedo" >&2; exit 1; }
+	cp -a ./.taygedo-src/openwrt/luci-app-taygedo ./package/
+	rm -rf ./.taygedo-src
+
+	TG_MK=./package/luci-app-taygedo/Makefile
+	# TAYGEDO_VER 在上游写作 v$(PKG_VERSION)，这里直接展开 PKG_VERSION。
+	TG_PKGVER=$(sed -n 's/^PKG_VERSION:=//p' "$TG_MK" | head -n1)
+	TG_VER="v${TG_PKGVER}"
+	TG_TRIPLE=aarch64-unknown-linux-musl
+	TG_ASSET="taygedo-rs-${TG_TRIPLE}-openwrt.tar.gz"
+	[ -n "$TG_PKGVER" ] || { echo "[feeds] ERROR: taygedo Makefile 缺 PKG_VERSION" >&2; exit 1; }
+	mkdir -p ./dl
+	if [ ! -s "./dl/$TG_ASSET" ]; then
+		curl -fL --retry 3 --retry-delay 2 \
+			-o "./dl/$TG_ASSET.part" \
+			"https://github.com/LianXia233/taygedo-CI/releases/download/${TG_VER}/${TG_ASSET}" \
+			|| { rm -f "./dl/$TG_ASSET.part"; echo "[feeds] ERROR: taygedo 资产下载失败" >&2; exit 1; }
+		mv -f "./dl/$TG_ASSET.part" "./dl/$TG_ASSET"
+	fi
+	tar tzf "./dl/$TG_ASSET" 2>/dev/null | grep -qx 'taygedo-rs' || {
+		echo "[feeds] ERROR: ${TG_ASSET} 内没有 taygedo-rs" >&2; exit 1; }
+	echo "[feeds] luci-app-taygedo @ ${TG_VER}，资产 ${TG_ASSET}"
+fi
+
 # luci-app-mt5700：src/Makefile 直接调 cargo，没有为 musl 目标指定交叉链接器，
 # CI 里会退回宿主 cc（aarch64 的 --fix-cortex-a53-843419 直接报错）。
 # OpenWrt 会 export TARGET_CC_NOCACHE；在 cargo 命令行前按 RUST_TARGET 注入

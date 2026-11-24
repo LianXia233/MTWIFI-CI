@@ -114,9 +114,22 @@ CONFIG_PACKAGE_luci-app-airpi3000m-fancontrol=y
 CONFIG_PACKAGE_kmod-hwmon-pwmfan=y
 
 # ---- 模组管理 ----
-CONFIG_PACKAGE_qmodem=y
-CONFIG_PACKAGE_luci-app-qmodem=y
-CONFIG_PACKAGE_luci-app-qmodem-generic=y
+# 自用 FM350 方案不启用 QModem（参考 AP3000M-FM350：FM350 独占 AT 口，
+# 两套管理器同时存在会争抢串口）。旧 QModem 包保留在树里，仅不选中。
+CONFIG_PACKAGE_qmodem=n
+CONFIG_PACKAGE_luci-app-qmodem=n
+CONFIG_PACKAGE_luci-app-qmodem-generic=n
+
+# ---- Fibocom FM350-GL 模组（复刻 OpenWRT-CI 的 AP3000M-FM350）----
+# 包来源：LianXia233/luci-app-fm350（feeds.sh 克隆到 package/luci-app-fm350）。
+# Makefile 自包含（不依赖 luci.mk），Rust 后端 fm350d 由 cargo 交叉编译；
+# 界面为中文硬编码，不存在 luci-i18n-fm350 翻译包。
+CONFIG_PACKAGE_luci-app-fm350=y
+CONFIG_PACKAGE_luci-base=y
+CONFIG_PACKAGE_rpcd=y
+CONFIG_PACKAGE_rpcd-mod-ucode=y
+CONFIG_PACKAGE_kmod-usb-net-rndis=y
+CONFIG_PACKAGE_kmod-usb-serial-option=y
 
 # ---- 按 chasey defconfig/mt7981-ax3000.config 补齐 ----
 # 与官方 defconfig 对齐：符号缺失会让 Kconfig 走默认值，版本/模式/

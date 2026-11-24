@@ -80,4 +80,34 @@ print(f"[rust] mt5700: cargo/rustc 固定到 {root}（替换 {n} 处）")
 PY
 fi
 
+# luci-app-fm350 在自己的 Makefile 里直接调 cargo（不经过 src/Makefile）。
+# 同样固定到本次 rustup sysroot；变量必须在 $(eval BuildPackage) 之前赋值，
+# 否则 Build/Compile 展开时仍会拿到 cargo/rustc 的 PATH 版本。
+FM350_MK="$PWD/package/luci-app-fm350/Makefile"
+if [ -f "$FM350_MK" ]; then
+	python3 - "$FM350_MK" "$RUST_ROOT" <<'PY'
+import sys
+path, root = sys.argv[1], sys.argv[2]
+s = open(path, encoding="utf-8").read()
+marker = "# CI-RUST-SYSROOT(fm350)"
+if marker in s:
+    print("[rust] fm350: 已固定过 sysroot，跳过")
+    raise SystemExit(0)
+anchor = "$(eval $(call BuildPackage,$(PKG_NAME)))"
+if anchor not in s:
+    raise SystemExit("[rust] fm350 Makefile 未找到 BuildPackage 锚点")
+block = f"""{marker}
+# 由 .github/scripts/rust-toolchain.sh 注入：固定官方 rustup 工具链，
+# 避免 PATH 上被缓存覆盖的 staging cargo/rustc 导致 E0463。
+CARGO := {root}/bin/cargo
+export RUSTC := {root}/bin/rustc
+export RUSTDOC := {root}/bin/rustdoc
+
+"""
+open(path, "w", encoding="utf-8", newline="").write(
+    s.replace(anchor, block + anchor, 1))
+print(f"[rust] fm350: cargo/rustc 固定到 {root}")
+PY
+fi
+
 echo "[rust] 已接入 runner 工具链：$RUST_TOOLCHAIN -> $RUST_TARGET"
