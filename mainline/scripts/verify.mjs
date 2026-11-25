@@ -18,6 +18,7 @@ for (let i = 0; i < args.length; i += 2) {
 
 function files(path) {
 	return readdirSync(path).flatMap(name => {
+		if (name === '.qoder-credits' || name === '.git') return [];
 		const child = join(path, name);
 		return statSync(child).isDirectory() ? files(child) : [child];
 	});
@@ -34,6 +35,10 @@ const requirements = {
 		'CONFIG_TARGET_mediatek_filogic_DEVICE_hiveton_h5000m=y',
 		'CONFIG_PACKAGE_kmod-mt7996e=y',
 		'CONFIG_PACKAGE_kmod-mt7992-23-firmware=y',
+		'CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y',
+		'CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y',
+		'CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y',
+		'CONFIG_PACKAGE_kmod-usb-net-rtl8152=y',
 		'CONFIG_PACKAGE_mtwifi-mainline=y',
 		'CONFIG_PACKAGE_kmod-nft-offload=y',
 		'# CONFIG_PACKAGE_bridger is not set',
@@ -43,6 +48,10 @@ const requirements = {
 		'CONFIG_PACKAGE_kmod-mt7915e=y',
 		'CONFIG_PACKAGE_kmod-mt7981-firmware=y',
 		'CONFIG_PACKAGE_mt7981-wo-firmware=y',
+		'CONFIG_PACKAGE_kmod-usb-net-cdc-ether=y',
+		'CONFIG_PACKAGE_kmod-usb-net-cdc-ncm=y',
+		'CONFIG_PACKAGE_kmod-usb-net-qmi-wwan=y',
+		'CONFIG_PACKAGE_kmod-usb-net-rtl8152=y',
 		'CONFIG_PACKAGE_mtwifi-mainline=y',
 		'CONFIG_PACKAGE_kmod-nft-offload=y',
 		'# CONFIG_PACKAGE_bridger is not set',
@@ -69,6 +78,7 @@ for (const path of [
 	'files/etc/modprobe.d/mt7915e.conf',
 	'files/etc/modprobe.d/mt7996e.conf',
 	'files/etc/uci-defaults/90-mtwifi-offload',
+	'files/etc/hotplug.d/net/99-mtwifi-usb-offload',
 	'files/usr/sbin/mtwifi-offload-status',
 ]) {
 	if (!statSync(join(packageRoot, path)).isFile()) throw new Error(`Missing package file: ${path}`);
@@ -78,7 +88,9 @@ const packageMakefile = readFileSync(join(packageRoot, 'Makefile'), 'utf8');
 for (const text of [
 	'PKG_NAME:=mtwifi-mainline',
 	'include $(INCLUDE_DIR)/package.mk',
+	'define Build/Compile\nendef',
 	'DEPENDS:=+firewall4 +ethtool +nftables +kmod-nft-offload',
+	'$(INSTALL_BIN) ./files/etc/hotplug.d/net/99-mtwifi-usb-offload $(1)/etc/hotplug.d/net/99-mtwifi-usb-offload',
 ]) {
 	if (!packageMakefile.includes(text)) throw new Error(`Package Makefile missing ${text}`);
 }
@@ -91,6 +103,11 @@ if (!modprobe.includes('options mt7915e wed_enable=1')) {
 const mt7996Modprobe = readFileSync(join(packageRoot, 'files/etc/modprobe.d/mt7996e.conf'), 'utf8');
 if (!mt7996Modprobe.includes('wed_enable=1') || !mt7996Modprobe.includes('wed_rro=0')) {
 	throw new Error('H5000M must use TX WED without unsupported WO RX offload');
+}
+
+const usbHotplug = readFileSync(join(packageRoot, 'files/etc/hotplug.d/net/99-mtwifi-usb-offload'), 'utf8');
+for (const text of ['[ "$ACTION" = add ]', '*/usb*/*)', 'ethtool -k "$DEVICENAME"', 'tcp-segmentation-offload', 'tx-gso', 'rx-gro', 'large-receive-offload']) {
+	if (!usbHotplug.includes(text)) throw new Error(`USB offload hotplug missing ${text}`);
 }
 
 const patchPath = join(root, 'patches/mt76/100-mt7996-optional-wed-rro.patch');

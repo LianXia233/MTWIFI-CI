@@ -1,0 +1,33 @@
+#!/bin/sh
+
+[ "$ACTION" = add ] || exit 0
+[ -n "$DEVICENAME" ] || exit 0
+command -v ethtool >/dev/null 2>&1 || exit 0
+
+device=$(readlink -f "/sys/class/net/$DEVICENAME/device" 2>/dev/null)
+case "$device" in
+*/usb*/*) ;;
+*) exit 0 ;;
+esac
+
+features=$(ethtool -k "$DEVICENAME" 2>/dev/null) || exit 0
+
+enable_feature() {
+	feature=$1
+	printf '%s\n' "$features" | grep -q "^$feature: " || return 0
+	ethtool -K "$DEVICENAME" "$feature" on >/dev/null 2>&1 || true
+}
+
+for feature in \
+	tx-checksum-ip-generic \
+	tx-checksum-ipv6 \
+	tx-scatter-gather \
+	tx-scatter-gather-fraglist \
+	tcp-segmentation-offload \
+	tx-gso \
+	rx-checksum \
+	rx-gro \
+	large-receive-offload
+do
+	enable_feature "$feature"
+done

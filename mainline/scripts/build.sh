@@ -113,11 +113,11 @@ fi
 case "$DEVICE" in
 h5000m)
 	expected_device=hiveton_h5000m
-	expected_packages='kmod-mt7996e kmod-mt7992-23-firmware kmod-nft-offload mtwifi-mainline'
+	expected_packages='kmod-mt7996e kmod-mt7992-23-firmware kmod-usb-net-cdc-ether kmod-usb-net-cdc-ncm kmod-usb-net-qmi-wwan kmod-usb-net-rtl8152 kmod-nft-offload mtwifi-mainline'
 	;;
 ap3000m)
 	expected_device=airpi_ap3000m
-	expected_packages='kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware kmod-nft-offload mtwifi-mainline'
+	expected_packages='kmod-mt7915e kmod-mt7981-firmware mt7981-wo-firmware kmod-usb-net-cdc-ether kmod-usb-net-cdc-ncm kmod-usb-net-qmi-wwan kmod-usb-net-rtl8152 kmod-nft-offload mtwifi-mainline'
 	;;
 esac
 

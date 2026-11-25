@@ -71,7 +71,11 @@ for netdev in /sys/class/net/*; do
 	case "$device" in
 	*/usb*/*)
 		name=$(basename "$netdev")
-		printf 'usb_netdev=%s\n' "$name"
+		driver=unknown
+		[ -e "$netdev/device/driver" ] && driver=$(basename "$(readlink -f "$netdev/device/driver")")
+		speed=unknown
+		[ -r "$netdev/speed" ] && speed=$(cat "$netdev/speed")
+		printf 'usb_netdev=%s driver=%s speed_mbps=%s\n' "$name" "$driver" "$speed"
 		if command -v ethtool >/dev/null 2>&1; then
 			ethtool -k "$name" 2>/dev/null | grep -E '^(tx-checksum|tx-checksum-ip-generic|rx-checksum|tcp-segmentation-offload|tx-gso|rx-gro|large-receive-offload):' || true
 		fi
@@ -79,6 +83,7 @@ for netdev in /sys/class/net/*; do
 	esac
 done
 printf '%s\n' 'usb_netdevs_end'
+printf '%s\n' 'usb_device_offload=checksum_tso_gso_gro'
 printf 'usb_cpu_bypass=unsupported_by_mainline_ppe\n'
 printf '%s\n' 'hardware_offload_verification=compare_wed_and_ppe_counters_under_load'
 

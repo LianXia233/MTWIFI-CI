@@ -76,6 +76,15 @@ jobs:
           test -n "$(find "$SOURCE/bin/targets" -type f -name '*sysupgrade.bin' -print -quit)"
           rootfs=$(find "$SOURCE/build_dir" -maxdepth 2 -type d -name 'root-*' -print -quit)
           test -n "$rootfs"
+          test -f "$rootfs/etc/hotplug.d/net/99-mtwifi-usb-offload"
+          kernel_config=$(find "$SOURCE/build_dir" -maxdepth 4 -type f -path '*/linux-*/.config' -print -quit)
+          test -n "$kernel_config"
+          for symbol in USB_NET_CDCETHER USB_NET_CDC_NCM USB_NET_QMI_WWAN USB_RTL8152; do
+            grep -q "^CONFIG_${symbol}=m$" "$kernel_config"
+          done
+          for module in cdc_ether cdc_ncm qmi_wwan r8152; do
+            test -n "$(find "$rootfs/lib/modules" -type f -name "$module.ko" -print -quit)"
+          done
           case "$DEVICE" in
             h5000m)
               test -n "$(find "$rootfs/lib/modules" -type f -name 'mt7996e.ko' -print -quit)"
