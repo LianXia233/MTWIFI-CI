@@ -1,0 +1,17 @@
+#!/bin/sh
+
+[ -r /etc/config/firewall ] || exit 0
+
+found_eth=0
+for driver in /sys/bus/platform/drivers/mtk_soc_eth; do
+	[ -d "$driver" ] && found_eth=1
+done
+[ "$found_eth" -eq 1 ] || exit 0
+
+uci -q batch <<'EOF'
+set firewall.@defaults[0].flow_offloading='1'
+set firewall.@defaults[0].flow_offloading_hw='1'
+commit firewall
+EOF
+
+exit 0

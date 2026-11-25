@@ -1,0 +1,85 @@
+#!/bin/sh
+
+board=unknown
+[ -r /tmp/sysinfo/board_name ] && board=$(cat /tmp/sysinfo/board_name)
+printf 'board=%s\n' "$board"
+printf 'kernel=%s\n' "$(uname -r)"
+
+for module in mt7915e mt7996e; do
+	for parameter in wed_enable wed_rro; do
+		path="/sys/module/$module/parameters/$parameter"
+		if [ -r "$path" ]; then
+			printf '%s_%s=%s\n' "$module" "$parameter" "$(cat "$path")"
+		fi
+	done
+done
+
+if command -v lspci >/dev/null 2>&1; then
+	lspci -d 14c3: -nn
+fi
+
+for device in /sys/bus/platform/devices/*; do
+	[ -e "$device/driver" ] || continue
+	driver=$(basename "$(readlink "$device/driver")")
+	case "$driver" in
+	mtk_soc_eth|mtk_wed)
+		printf 'platform_driver=%s device=%s\n' "$driver" "$(basename "$device")"
+		;;
+	esac
+done
+
+for entry in /sys/kernel/debug/wed*/txinfo /sys/kernel/debug/wed*/rxinfo /sys/kernel/debug/wed*/amsdu /sys/kernel/debug/wed*/rro; do
+	[ -r "$entry" ] || continue
+	printf '%s_begin\n' "${entry#/sys/kernel/debug/}"
+	cat "$entry"
+	printf '%s_end\n' "${entry#/sys/kernel/debug/}"
+done
+
+for entry in /sys/kernel/debug/ppe*/entries /sys/kernel/debug/ppe*/bind; do
+	[ -r "$entry" ] || continue
+	printf '%s_begin\n' "${entry#/sys/kernel/debug/}"
+	cat "$entry"
+	printf '%s_end\n' "${entry#/sys/kernel/debug/}"
+done
+
+if [ -r /sys/module/mt7996e/parameters/wed_rro ]; then
+	rro=$(cat /sys/module/mt7996e/parameters/wed_rro)
+	if [ "$rro" = 0 ]; then
+		printf '%s\n' 'mt7996_rx_offload=cpu'
+	fi
+fi
+
+printf 'firewall_flow_offloading=%s\n' "$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null || echo unset)"
+printf 'firewall_flow_offloading_hw=%s\n' "$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null || echo unset)"
+
+offloaded=0
+if [ -r /proc/net/nf_conntrack ]; then
+	offloaded=$(grep -c OFFLOAD /proc/net/nf_conntrack 2>/dev/null || true)
+fi
+printf 'offloaded_conntrack_entries=%s\n' "${offloaded:-0}"
+
+if command -v nft >/dev/null 2>&1; then
+	printf '%s\n' 'flowtables_begin'
+	nft list flowtables 2>/dev/null || true
+	printf '%s\n' 'flowtables_end'
+fi
+
+printf '%s\n' 'usb_netdevs_begin'
+for netdev in /sys/class/net/*; do
+	[ -e "$netdev/device" ] || continue
+	device=$(readlink -f "$netdev/device")
+	case "$device" in
+	*/usb*/*)
+		name=$(basename "$netdev")
+		printf 'usb_netdev=%s\n' "$name"
+		if command -v ethtool >/dev/null 2>&1; then
+			ethtool -k "$name" 2>/dev/null | grep -E '^(tx-checksum|tx-checksum-ip-generic|rx-checksum|tcp-segmentation-offload|tx-gso|rx-gro|large-receive-offload):' || true
+		fi
+		;;
+	esac
+done
+printf '%s\n' 'usb_netdevs_end'
+printf 'usb_cpu_bypass=unsupported_by_mainline_ppe\n'
+printf '%s\n' 'hardware_offload_verification=compare_wed_and_ppe_counters_under_load'
+
+exit 0

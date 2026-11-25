@@ -66,6 +66,28 @@
 
 ---
 
+## 主线 mt76 替代路线
+
+仓库的 [`mainline/`](mainline/) 目录提供一条与现有闭源 overlay 独立的构建路线：固定 ImmortalWrt `73bc086a62f951d96e5d7404f04c4d73e141cad2`（Linux 6.18.60）与 mt76 `0936617dc529ff9da0385221d3fa6de732231177`，只叠加自写的 MT7992 TX-only WED 补丁、设备配置、模块参数和验收脚本。
+
+| 设备 | 无线驱动 | 硬件加速边界 |
+|:---|:---|:---|
+| Hiveton H5000M | 主线 `mt7996e` + MT7992 variant 23 固件 | TX WED/AMSDU 与 PPE 流表；MT7987 缺少 WO 固件和设备树资源，WiFi RX 保留 CPU |
+| AirPi AP3000M | 主线 `mt7915e` + MT7981/WO 固件 | 主线 WED/WO，包含 WiFi RX RRO；需实机计数器验收 |
+| USB 网络设备 | 使用具体网卡自己的主线驱动 | 仅 checksum/TSO/GSO/GRO 与软件流表；当前主线 PPE 没有 USB 网卡零 CPU NAT 路径 |
+
+该目录**不是从零逐行重写驱动**，也没有接入现有 `mtwifi.yml`。本地静态校验已通过；提交时 H5000M 驱动编译仍在进行，AP3000M defconfig、两台完整镜像和实机 WED/PPE/USB 验证尚未完成。
+
+```sh
+cd mainline
+sh scripts/build.sh --source /path/to/immortalwrt --device h5000m --jobs 12 --overwrite-config
+sh scripts/build.sh --source /path/to/immortalwrt --device ap3000m --jobs 12 --overwrite-config
+```
+
+Windows 使用 Git Bash 执行同一命令，`--source` 可传 `/home/...` 或 `//wsl.localhost/<发行版>/home/...`，脚本会重执行到 WSL。构建前请保存源树中的本地 `.config`。
+
+---
+
 ## 📖 项目概览
 
 **MTWIFI-CI** 是一个面向联发科 Filogic 生态的现代化固件云编译与移植工程。
