@@ -1,0 +1,100 @@
+name: mainline-mt76
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 要编译的主线 mt76 设备
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - h5000m
+          - ap3000m
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.device }} @ mainline mt76
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        device: ${{ fromJSON(inputs.device == 'all' && '["h5000m","ap3000m"]' || format('["{0}"]', inputs.device)) }}
+    env:
+      DEVICE: ${{ matrix.device }}
+      BASE_PIN: 73bc086a62f951d96e5d7404f04c4d73e141cad2
+      SOURCE: /mnt/build_wrt/wrt
+    steps:
+      - name: 检出当前主线变更
+        uses: actions/checkout@v7
+
+      - name: 准备编译宿主
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: sudo bash .github/scripts/host-setup.sh
+
+      - name: 固定 ImmortalWrt 基线
+        run: |
+          sudo mkdir -p /mnt/build_wrt
+          sudo chown "$USER":"$USER" /mnt/build_wrt
+          git clone --filter=blob:none --no-checkout https://github.com/immortalwrt/immortalwrt.git "$SOURCE"
+          git -C "$SOURCE" fetch --depth 1 origin "$BASE_PIN"
+          git -C "$SOURCE" checkout --detach FETCH_HEAD
+          test "$(git -C "$SOURCE" rev-parse HEAD)" = "$BASE_PIN"
+
+      - name: 更新 feeds
+        run: |
+          cd "$SOURCE"
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 配置并编译主线固件
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/build-reports"
+          set -o pipefail
+          sh "$GITHUB_WORKSPACE/mainline/scripts/build.sh" \
+            --source "$SOURCE" \
+            --device "$DEVICE" \
+            --jobs "$(nproc)" 2>&1 | tee "$GITHUB_WORKSPACE/build-reports/$DEVICE.log"
+
+      - name: 校验配置、模块与固件
+        run: |
+          cp "$SOURCE/.config" "$GITHUB_WORKSPACE/build-reports/$DEVICE.config"
+          if grep -Eq '^CONFIG_(PACKAGE_bridger|NEED_BPF_TOOLCHAIN|USE_LLVM_BUILD)=y$' "$SOURCE/.config"; then
+            echo 'profile unexpectedly enabled bridger or the LLVM BPF toolchain' >&2
+            exit 1
+          fi
+          if grep -Eq '^CONFIG_PACKAGE_kmod-mt_wifi7?=y$' "$SOURCE/.config"; then
+            echo 'vendor wireless packages must not be enabled' >&2
+            exit 1
+          fi
+          test -n "$(find "$SOURCE/bin/targets" -type f -name '*sysupgrade.bin' -print -quit)"
+          rootfs=$(find "$SOURCE/build_dir" -maxdepth 2 -type d -name 'root-*' -print -quit)
+          test -n "$rootfs"
+          case "$DEVICE" in
+            h5000m)
+              test -n "$(find "$rootfs/lib/modules" -type f -name 'mt7996e.ko' -print -quit)"
+              test -f "$rootfs/lib/firmware/mediatek/mt7996/mt7992_wm_23.bin"
+              grep -qx 'options mt7996e wed_enable=1 wed_rro=0' "$rootfs/etc/modprobe.d/mt7996e.conf"
+              ;;
+            ap3000m)
+              test -n "$(find "$rootfs/lib/modules" -type f -name 'mt7915e.ko' -print -quit)"
+              test -f "$rootfs/lib/firmware/mediatek/mt7981_wo.bin"
+              grep -qx 'options mt7915e wed_enable=1' "$rootfs/etc/modprobe.d/mt7915e.conf"
+              ;;
+          esac
+
+      - name: 上传固件与构建报告
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mainline-mt76-${{ matrix.device }}-${{ github.run_attempt }}
+          path: |
+            /mnt/build_wrt/wrt/bin/targets/
+            build-reports/
+          retention-days: 14

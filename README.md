@@ -76,12 +76,18 @@
 | AirPi AP3000M | 主线 `mt7915e` + MT7981/WO 固件 | 主线 WED/WO，包含 WiFi RX RRO；需实机计数器验收 |
 | USB 网络设备 | 使用具体网卡自己的主线驱动 | 仅 checksum/TSO/GSO/GRO 与软件流表；当前主线 PPE 没有 USB 网卡零 CPU NAT 路径 |
 
-该目录**不是从零逐行重写驱动**，也没有接入现有 `mtwifi.yml`。本地静态校验已通过；提交时 H5000M 驱动编译仍在进行，AP3000M defconfig、两台完整镜像和实机 WED/PPE/USB 验证尚未完成。
+该目录**不是从零逐行重写驱动**。它使用独立的 [`mainline-mt76.yml`](.github/workflows/mainline-mt76.yml)，现有闭源 `mtwifi.yml` 保持不变。本地静态校验已通过；H5000M 驱动编译、AP3000M defconfig、两台完整镜像和实机 WED/PPE/USB 验证仍需以实际构建结果为准。
 
 ```sh
 cd mainline
 sh scripts/build.sh --source /path/to/immortalwrt --device h5000m --jobs 12 --overwrite-config
 sh scripts/build.sh --source /path/to/immortalwrt --device ap3000m --jobs 12 --overwrite-config
+```
+
+GitHub Actions 可手动触发两台设备：
+
+```sh
+gh workflow run mainline-mt76.yml --ref main -f device=all
 ```
 
 Windows 使用 Git Bash 执行同一命令，`--source` 可传 `/home/...` 或 `//wsl.localhost/<发行版>/home/...`，脚本会重执行到 WSL。构建前请保存源树中的本地 `.config`。
