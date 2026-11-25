@@ -298,6 +298,17 @@ if [ "$MTK_STACK" = legacy ] && [ -d "$WARP_PATCHES" ]; then
 	note "warp：装载 patches/100-page-frag-6.18.patch"
 fi
 
+# legacy conninfra：patches/004 在 devm_clk_get("mcu"/"ap2conn") 返回
+# ERR_PTR 后仍调用 clk_prepare_enable()。AP3000M 的 consys 节点没有 clocks，
+# 启动时直接 oops（clk_prepare+0x14 / mtk_conninfra_probe）。补丁 011 把
+# 错误指针分支改为置 NULL，只有有效 clk 才 prepare/enable。
+CONN_PATCHES="$MTK_DRV/conninfra/patches"
+if [ "$MTK_STACK" = legacy ] && [ -d "$CONN_PATCHES" ]; then
+	cp -f "$GITHUB_WORKSPACE/port/conninfra-patches/011-fix-clk-errptr.patch" "$CONN_PATCHES/" \
+		|| die "conninfra 011 补丁装载失败"
+	note "conninfra：装载 patches/011-fix-clk-errptr.patch"
+fi
+
 # apk 的版本校验比 opkg 严格：6.18.55.TEST-r1 / 空版本会被 apk mkpkg 拒绝
 # （ERROR: info field 'version' has invalid value）。pdn 的几个 kmod 包用
 # PKG_VERSION:=TEST 或留空，KernelPackage 会拼出非法版本；统一改为 1.0。

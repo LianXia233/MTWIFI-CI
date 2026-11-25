@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# conninfra（chasey 20231229 源码）6.18 启动 panic 修复
+#
+# patches/004 为了在 MT7986 上手动拉起 MCU/AP2CONN 时钟，加入了
+#   mcu_clk = devm_clk_get(&pdev->dev, "mcu");
+#   if (IS_ERR(mcu_clk)) pr_err("mcu clock not found\n");
+#   if (clk_prepare_enable(mcu_clk)) ...
+# 但 AP3000M（MT7981）的 consys 节点没有 clocks/clock-names，devm_clk_get()
+# 返回 ERR_PTR(-ENOENT)，代码仍然把错误指针传给 clk_prepare()：
+#
+#   conninfra@(mtk_conninfra_probe:539) mcu clock not found
+#   Unable to handle kernel paging request at virtual address fffffffffffffffe
+#   pc : clk_prepare+0x14/0x3c
+#   lr : mtk_conninfra_probe+0x60/0x340 [conninfra]
+#   Kernel panic - not syncing: Oops: Fatal exception
+#
+# 这里把 IS_ERR 分支改成“记录后置 NULL”，只有拿到有效 clk 才 prepare/enable。
+# 与 6.18 的 devm_clk_get_optional() 语义一致，MT7981 无时钟时继续 probe；
+# MT7986 等有时钟的平台行为不变。
+--- a/platform/consys_hw.c
++++ b/platform/consys_hw.c
+@@ -535,16 +535,20 @@
+ 	}
+ 
+ 	mcu_clk = devm_clk_get(&pdev->dev, "mcu");
+-	if (IS_ERR(mcu_clk))
+-		pr_err("mcu clock not found\n");
+-	if (clk_prepare_enable(mcu_clk))
++	if (IS_ERR(mcu_clk)) {
++		pr_err("mcu clock not found: %ld\n", PTR_ERR(mcu_clk));
++		mcu_clk = NULL;
++	} else if (clk_prepare_enable(mcu_clk)) {
+ 		pr_err("mcu clock configuration failed\n");
++	}
+ 
+ 	ap_conn_clk = devm_clk_get(&pdev->dev, "ap2conn");
+-	if (IS_ERR(ap_conn_clk))
+-		pr_err("ap2conn clock not found\n");
+-	if (clk_prepare_enable(ap_conn_clk))
++	if (IS_ERR(ap_conn_clk)) {
++		pr_err("ap2conn clock not found: %ld\n", PTR_ERR(ap_conn_clk));
++		ap_conn_clk = NULL;
++	} else if (clk_prepare_enable(ap_conn_clk)) {
+ 		pr_err("ap2conn clock configuration failed\n");
++	}
+ 
+ 	if (consys_hw_ops == NULL)
+ 		consys_hw_ops = (const struct consys_hw_ops_struct*)g_conninfra_plat_data->hw_ops;
